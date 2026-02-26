@@ -1,31 +1,36 @@
 import cv2
 import numpy as np
 
+
 def segment_piece(image):
+    """
+    Détecte les pièces via la transformée de Hough.
+
+    Retourne une liste de cercles détectés : [(cx, cy, r), ...]
+    au lieu d'un mask global (qui causait des fusions de contours
+    lorsque des pièces étaient proches, rendant la détection incorrecte).
+
+    Paramètres HoughCircles ajustés :
+      - param2=40  : seuil plus strict → élimine les faux positifs
+      - maxRadius=150 : exclut les artefacts trop grands
+    """
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (9, 9), 0)
 
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-
-    # Seuillage automatique Otsu
-    _, thresh = cv2.threshold(
-        blur, 0, 255,
-        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    circles = cv2.HoughCircles(
+        blur,
+        cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=80,
+        param1=100,
+        param2=40,       # était 30 → trop permissif → faux positifs et artefacts
+        minRadius=30,
+        maxRadius=150    # était 200 → artefacts englobant plusieurs pièces à la fois
     )
 
-    # Nettoyage morphologique
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    if circles is None:
+        return []
 
-    # Trouver les contours des pièces
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Créer une image de superposition verte transparente
-    overlay = np.zeros_like(image, dtype=np.uint8)
-    for contour in contours:
-        cv2.drawContours(overlay, [contour], -1, (0, 255, 0), -1)  # Remplir en vert
-
-    # Superposer sur l'image originale avec transparence
-    result = cv2.addWeighted(image, 1.0, overlay, 0.5, 0)
-
-    return result
+    circles_int = np.around(circles[0]).astype(int)
+    return [(int(cx), int(cy), int(r)) for cx, cy, r in circles_int]

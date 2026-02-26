@@ -4,62 +4,91 @@ from segmentation import segment_piece
 from features import extract_features
 from classification import classify_piece
 from regression import estimate_diameter_mm
+from utils import compute_scale_factor, draw_label
+
 
 def process_image(image_path):
     image = cv2.imread(image_path)
+
     if image is None:
-        print("Erreur : image non trouvée")
+        print(f"Erreur : image non trouvée → {image_path}")
         return
 
-    # Redimensionnement pour affichage
+    # Redimensionner si trop grande
     h, w = image.shape[:2]
-    scale = 900 / max(h, w)
-    image = cv2.resize(image, None, fx=scale, fy=scale)
+    max_size = 900
+    if max(h, w) > max_size:
+        scale = max_size / max(h, w)
+        image = cv2.resize(image, None, fx=scale, fy=scale)
 
-    # Segmentation
-    mask = segment_piece(image)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Extraction multi-pièces
-    features_list, _ = extract_features(mask, image)
+    # --- Étape 1 : Détection des cercles ---
+    circles = segment_piece(image)
 
-    if len(features_list) == 0:
-        print("Aucune pièce détectée")
+    if len(circles) == 0:
+        print("Aucune pièce détectée. Vérifiez les paramètres de HoughCircles.")
         return
 
-    # Image finale
+    # --- Étape 2 : Extraction des features ---
+    features_list, _ = extract_features(circles, image)
+
+    print(f"{len(features_list)} pièce(s) détectée(s).")
+
+    # --- Étape 3 : Calibration automatique ---
+    # Identifie la pièce bimétallique (1€) pour calculer le scale factor
+    scale_factor, ref_idx = compute_scale_factor(features_list, gray)
+    print(f"Pièce de référence : pièce #{ref_idx + 1} "
+          f"({features_list[ref_idx]['diameter_pixels']:.0f}px) "
+          f"→ scale={scale_factor:.4f} mm/px")
+    print()
+
+    # --- Étape 4 : Rendu final ---
     segmented_image = image.copy()
+    total_value = 0.0
 
-    # Pour chaque pièce
-    for features in features_list:
-        x, y, w, h = features["box"]
+    # Correspondance nom → valeur en euros
+    coin_values = {
+        "1 cent": 0.01, "2 cent": 0.02, "5 cent": 0.05,
+        "10 cent": 0.10, "20 cent": 0.20, "50 cent": 0.50,
+        "1 Euro": 1.00, "2 Euro": 2.00
+    }
 
-        # Créer un masque pour cette pièce uniquement
-        piece_mask = np.zeros(mask.shape, dtype=np.uint8)
-        piece_mask[y:y+h, x:x+w] = mask[y:y+h, x:x+w]
+    for i, features in enumerate(features_list):
 
-        # Fusion vert transparent uniquement sur la pièce
-        green_overlay = np.zeros_like(segmented_image)
-        green_overlay[:] = (0, 255, 0)
-        piece_mask_rgb = cv2.cvtColor(piece_mask, cv2.COLOR_GRAY2BGR)
-        alpha = 0.4
-        segmented_image = np.where(piece_mask_rgb==255,
-                                   cv2.addWeighted(segmented_image, 1-alpha, green_overlay, alpha, 0),
-                                   segmented_image)
+        cx, cy = features["center"]
+        r = features["radius"]
+        x, y, bw, bh = features["box"]
+        is_ref = (i == ref_idx)
 
-        # Classification + régression
-        classe = classify_piece(features)
-        diameter_mm = estimate_diameter_mm(features)
+        # Overlay vert semi-transparent sur le disque
+        overlay = segmented_image.copy()
+        cv2.circle(overlay, (cx, cy), r, (0, 255, 0), -1)
+        cv2.addWeighted(overlay, 0.30, segmented_image, 0.70, 0, segmented_image)
 
-        # Texte au-dessus de la pièce
-        text = f"{classe} | {diameter_mm:.2f} mm"
-        cv2.putText(segmented_image, text, (x, y - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        # Cercle de détection vert
+        cv2.circle(segmented_image, (cx, cy), r, (0, 255, 0), 2)
 
-        # Optionnel : contour autour de la pièce
-        cv2.rectangle(segmented_image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        # Classification + estimation diamètre
+        classe, diameter_mm = classify_piece(features, scale_factor, is_reference=is_ref)
+        diameter_mm_reg = estimate_diameter_mm(features, scale_factor, is_reference=is_ref)
 
-    # Affichage final
-    cv2.imshow("Segmentation + Detection", segmented_image)
+        total_value += coin_values.get(classe, 0)
+
+        # Label : nom + diamètre estimé
+        text = f"{classe} | {diameter_mm_reg:.1f}mm"
+        draw_label(segmented_image, text, (x, y - 10))
+
+        # Debug console
+        raw_px = features['diameter_pixels']
+        print(f"  Pièce {i+1:>2}: {classe:10s} | {diameter_mm_reg:.1f}mm "
+              f"| {raw_px:.0f}px brut "
+              f"{'[REF]' if is_ref else ''}")
+
+    print()
+    print(f"  Valeur totale estimée : {total_value:.2f} €")
+
+    cv2.imshow("Detection de pieces", segmented_image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
