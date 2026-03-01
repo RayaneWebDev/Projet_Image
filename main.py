@@ -94,4 +94,4 @@ def process_image(image_path):
 
 
 if __name__ == "__main__":
-    process_image("img lounes medjbour.jpg")
+    process_image("piece_huang.jpg")
