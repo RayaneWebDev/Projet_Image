@@ -103,61 +103,48 @@ def _detect_bimetal(crop):
 
 
 def classify_all(features_list):
-    """
-    Classification robuste :
-    - utilise scale factor global
-    - tolérance perspective
-    - filtre couleur
-    """
-
     if not features_list:
         return []
 
-    # ─── 1. SCALE FACTOR GLOBAL ───
-    diam_px = [f["diameter_pixels"] for f in features_list]
+    COLOR_CANDS = {
+        "bronze":  ["1 cent", "2 cent", "5 cent"],
+        "gold":    ["10 cent", "20 cent", "50 cent"],
+        "silver":  ["1 Euro", "2 Euro"],
+        "unknown": list(COIN_DIAMETERS_MM.keys()),
+    }
 
-    # hypothèse : une pièce correspond à un diamètre réel
-    best_sf = None
+    diam_px    = [f["diameter_pixels"] for f in features_list]
+    color_labs = [f.get("color_label", "unknown") for f in features_list]
+
+    # ── Scale factor contraint par couleur ──────────────────
+    best_sf  = None
     best_err = float("inf")
 
-    for real_mm in COIN_DIAMETERS_MM.values():
-        for d in diam_px:
-            sf = real_mm / d
-            err = sum(
-                min(abs(sf * d2 - mm) for mm in COIN_DIAMETERS_MM.values())
-                for d2 in diam_px
+    for i, (d, color) in enumerate(zip(diam_px, color_labs)):
+        for ref_label in COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys())):
+            sf        = COIN_DIAMETERS_MM[ref_label] / d
+            total_err = sum(
+                min(abs(COIN_DIAMETERS_MM[l] - d2 * sf)
+                    for l in COLOR_CANDS.get(c2, list(COIN_DIAMETERS_MM.keys())))
+                for d2, c2 in zip(diam_px, color_labs)
             )
-            if err < best_err:
-                best_err = err
-                best_sf = sf
+            if total_err < best_err:
+                best_err = total_err
+                best_sf  = sf
 
-    sf = best_sf
+    sf = best_sf or 0.1
 
+    # ── Classification ──────────────────────────────────────
     results = []
-
-    # ─── 2. CLASSIFICATION ───
     for feat in features_list:
-        d_mm = feat["diameter_pixels"] * sf
-        color = feat.get("color_label", "unknown")
-        crop  = feat.get("crop")
+        d_mm   = feat["diameter_pixels"] * sf
+        color  = feat.get("color_label", "unknown")
+        crop   = feat.get("crop_cv2")
+        cands  = COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys()))
 
-        # filtre couleur
-        if color == "bronze":
-            candidates = ["1 cent", "2 cent", "5 cent"]
-        elif color == "gold":
-            candidates = ["10 cent", "20 cent", "50 cent"]
-        elif color == "silver":
-            candidates = ["1 Euro", "2 Euro"]
-        else:
-            candidates = list(COIN_DIAMETERS_MM.keys())
+        best_label = min(cands, key=lambda c: abs(COIN_DIAMETERS_MM[c] - d_mm))
 
-        # match avec tolérance
-        best_label = min(
-            candidates,
-            key=lambda c: abs(COIN_DIAMETERS_MM[c] - d_mm)
-        )
-
-        # correction 1€ / 2€
+        # Correction 1€ / 2€ par détection bimétal
         if best_label in ["1 Euro", "2 Euro"] and crop is not None:
             is_bimetal, diff = _detect_bimetal(crop)
             if is_bimetal:
@@ -165,7 +152,6 @@ def classify_all(features_list):
 
         dist = abs(COIN_DIAMETERS_MM[best_label] - d_mm)
         conf = max(0.3, 1.0 - dist / 5.0)
-
         results.append((best_label, d_mm, conf))
 
     return results

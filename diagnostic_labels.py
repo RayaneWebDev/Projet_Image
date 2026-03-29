@@ -58,7 +58,8 @@ all_labels = sorted(set(
 ))
 
 # Header
-print(f"{'GT \\ PRED':<12}", end="")
+header = "GT \\ PRED"
+print(f"{header:<12}", end="")
 for lbl in all_labels:
     print(f"{lbl:>12}", end="")
 print()

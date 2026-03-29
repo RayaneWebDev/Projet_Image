@@ -18,6 +18,7 @@ def process_image(image_path, debug=False):
         scale = 1200 / max(h, w)
         image = cv2.resize(image, None, fx=scale, fy=scale)
 
+
     circles = segment_piece(image)
 
     print(f"{len(circles)} pièces détectées")
@@ -60,14 +61,40 @@ def process_image(image_path, debug=False):
 
         print(f"{label} | {conf*100:.0f}% | {value}€")
 
-    draw_label(image_out, f"TOTAL: {total:.2f} EUR", (10, image_out.shape[0] - 20))
-
     print("TOTAL =", total)
-
-    cv2.imshow("Result", image_out)
+    # Redimensionne en respectant le ratio
+    max_w, max_h = 1400, 900
+    h_out, w_out = image_out.shape[:2]
+    scale = min(max_w / w_out, max_h / h_out, 1.0)
+    display = cv2.resize(image_out, (int(w_out * scale), int(h_out * scale)),
+                         interpolation=cv2.INTER_AREA)
+    # Total écrit sur l'image redimensionnée
+    draw_label(display, f"TOTAL: {total:.2f} EUR", (10, 30),
+               color=(255, 220, 0), scale=0.8)
+    cv2.imshow("Result", display)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-    process_image("8.jpg", debug=True)
+    import os
+    
+    demo_dir = "demo_images_val"  # ← mets tes images ici
+    
+    if not os.path.isdir(demo_dir):
+        print(f"Dossier '{demo_dir}' introuvable.")
+    else:
+        extensions = {".jpg", ".jpeg", ".png", ".bmp"}
+        images = sorted([
+            os.path.join(demo_dir, f)
+            for f in os.listdir(demo_dir)
+            if os.path.splitext(f)[1].lower() in extensions
+        ])
+        
+        if not images:
+            print(f"Aucune image dans '{demo_dir}'")
+        else:
+            print(f"{len(images)} image(s) trouvée(s) dans '{demo_dir}'")
+            for img in images:
+                print(f"\n--- {os.path.basename(img)} ---")
+                process_image(img, debug=True)

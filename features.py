@@ -3,21 +3,14 @@ import numpy as np
 
 COLOR_RANGES = {
     "bronze": [
-        # On accepte des couleurs plus sombres (V dès 30)
-        # mais on exige une saturation très marquée (S > 80) pour ne pas confondre avec l'ombre portée sur la table
-        (0, 15, 80, 255, 30, 200),
-        (165, 180, 80, 255, 30, 200),
+        (0,  15, 60, 255, 40, 210),
+        (165, 180, 60, 255, 40, 210),
     ],
     "gold": [
-        # L'or en plein soleil brille (V haut), mais dans l'ombre il devient "moutarde"
-        # On élargit la plage de Valeur (V) de 40 à 255
-        (15, 40, 60, 255, 40, 255),
+        (15, 40, 40, 220, 60, 255),
     ],
     "silver": [
-        # Le Silver est le plus dur à gérer avec l'ombre.
-        # L'astuce : Le silver est TOUJOURS très peu saturé (S < 50).
-        # Même dans l'ombre, une pièce d'argent reste "grise" (S bas).
-        (0, 180, 0, 50, 40, 240),
+        (0, 180, 0, 45, 50, 255),
     ],
 }
 
@@ -72,7 +65,7 @@ def extract_features(circles, image):
 
         contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        diameter = float(r * 2)  # fallback
+        diameter = float(r * 2 * 1.15)  # correction biais HoughCircles
         ellipse_ratio = 1.0
 
         if contours:
@@ -83,7 +76,7 @@ def extract_features(circles, image):
                 (_, _), (major, minor), _ = ellipse
 
                 # 🔥 on prend le GRAND axe = diamètre réel corrigé
-                diameter = max(major, minor)
+                diameter = max(major, minor) * 1.15
 
                 ellipse_ratio = min(major, minor) / max(major, minor)
 
