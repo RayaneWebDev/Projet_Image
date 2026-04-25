@@ -1,11 +1,13 @@
 import cv2
 import numpy as np
 import os
-from utils import COIN_DIAMETERS_MM, COIN_VALUES_EUR
+from core.utils import COIN_DIAMETERS_MM, COIN_VALUES_EUR
 
-KNN_DB_PATH = "model/knn_database.npy"
+KNN_DB_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "model", "knn_database.npy"
+)
 
-# Candidats par groupe couleur
+# Candidats par groupe couleur : restreint la recherche k-NN et le scale factor
 COLOR_CANDS = {
     "bronze":  ["1 cent", "2 cent", "5 cent"],
     "gold":    ["10 cent", "20 cent", "50 cent"],
@@ -15,6 +17,7 @@ COLOR_CANDS = {
 
 
 def _load_knn():
+    """Charge la base k-NN depuis le fichier .npy. Retourne (X, y) ou (None, None)."""
     if not os.path.exists(KNN_DB_PATH):
         return None, None
     try:
@@ -27,7 +30,10 @@ _KNN_X, _KNN_Y = _load_knn()
 
 
 def _knn_predict(ring_features, color, k=5):
-    """k-NN pondéré par distance, restreint aux candidats de la couleur."""
+    """
+    k-NN pondere par distance inverse, restreint aux candidats de la couleur.
+    Retourne (label_predit, confiance) ou (None, 0.0) si indisponible.
+    """
     if _KNN_X is None or ring_features is None:
         return None, 0.0
 
@@ -46,21 +52,23 @@ def _knn_predict(ring_features, color, k=5):
     idx       = np.argsort(dists)[:k_eff]
     neighbors = y_filt[idx]
 
+    # Vote pondere par 1/distance
     votes = {}
     for lbl, d in zip(neighbors, dists[idx]):
         w = 1.0 / (d + 1e-6)
         votes[lbl] = votes.get(lbl, 0.0) + w
 
-    best   = max(votes, key=votes.get)
-    total  = sum(votes.values())
-    conf   = votes[best] / total if total > 0 else 0.0
+    best  = max(votes, key=votes.get)
+    total = sum(votes.values())
+    conf  = votes[best] / total if total > 0 else 0.0
     return best, conf
 
 
 def _detect_bimetal(crop):
     """
-    Détecte si une pièce est bimétal en comparant la saturation et la
-    luminosité du centre (20% du rayon) vs l'anneau (35-44% du rayon).
+    Detecte si une piece est bimetal en comparant la saturation HSV
+    du centre (20% du rayon) vs l'anneau intermediaire (35-44% du rayon).
+    Retourne (is_bimetal, diff_saturation).
     """
     if crop is None or crop.size == 0:
         return False, 0.0
@@ -68,12 +76,14 @@ def _detect_bimetal(crop):
     if h < 20 or w < 20:
         return False, 0.0
 
-    hsv    = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    ctr    = (w // 2, h // 2)
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    ctr = (w // 2, h // 2)
 
+    # Masque centre
     mask_c = np.zeros((h, w), dtype=np.uint8)
     cv2.circle(mask_c, ctr, int(w * 0.20), 255, -1)
 
+    # Masque anneau intermediaire
     mask_r = np.zeros((h, w), dtype=np.uint8)
     cv2.circle(mask_r, ctr, int(w * 0.44), 255, -1)
     cv2.circle(mask_r, ctr, int(w * 0.35),   0, -1)
@@ -88,18 +98,27 @@ def _detect_bimetal(crop):
     diff_sat = abs(sat_c - sat_r)
     diff_val = abs(val_c - val_r)
 
+    # Seuils calibres empiriquement sur data/validation
     return (diff_sat > 15) and (diff_val > 10), diff_sat
 
 
 def classify_all(features_list):
+    """
+    Classifie toutes les pieces d'une image en deux etapes :
+      1. Scale factor global contraint par couleur -> label diametre
+      2. k-NN sur ring_features -> correction si confiance suffisante
+    Retourne une liste de (label, d_mm, confiance).
+    """
     if not features_list:
         return []
 
     diam_px    = [f["diameter_pixels"] for f in features_list]
     color_labs = [f.get("color_label", "unknown") for f in features_list]
 
-    # Scale factor global contraint par couleur :
-    # on minimise l'erreur totale sur tous les diamètres
+    # --- Scale factor global contraint par couleur ---
+    # On cherche sf tel que : diametre_pixels * sf ≈ diametre_reel_mm
+    # en minimisant l'erreur totale sur toutes les pieces de l'image.
+    # La contrainte couleur evite que 10ct serve de reference pour des pieces bronze.
     best_sf, best_err = None, float("inf")
     for d, color in zip(diam_px, color_labs):
         for ref_label in COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys())):
@@ -122,14 +141,15 @@ def classify_all(features_list):
         rf    = feat.get("ring_features")
         cands = COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys()))
 
-        # 2€ détecté gold (anneau doré) → reclasser en silver
+        # 2€ souvent detecte gold a cause de son anneau dore -> reclasser silver
         if color == "gold" and crop is not None:
             is_bimetal, _ = _detect_bimetal(crop)
             if is_bimetal:
                 color = "silver"
                 cands = COLOR_CANDS["silver"]
 
-        sf_label          = min(cands, key=lambda c: abs(COIN_DIAMETERS_MM[c] - d_mm))
+        # Label par scale factor (nearest neighbor sur diametre)
+        sf_label            = min(cands, key=lambda c: abs(COIN_DIAMETERS_MM[c] - d_mm))
         knn_label, knn_conf = _knn_predict(rf, color, k=5)
 
         # k-NN prioritaire si confiance suffisante, sinon scale factor
@@ -140,7 +160,8 @@ def classify_all(features_list):
         else:
             final_label = sf_label
 
-        # Séparation 1€/2€ par bimétal + diamètre
+        # Separation 1€/2€ par bimetal + diametre
+        # 2€ = 25.75mm, 1€ = 23.25mm -> seuil a 24.8mm
         if final_label in ["1 Euro", "2 Euro"] and crop is not None:
             is_bimetal, diff_sat = _detect_bimetal(crop)
             if is_bimetal:
@@ -159,7 +180,7 @@ def classify_all(features_list):
 
 
 def classify_piece(features, all_features):
-    """Wrapper pour compatibilité avec main.py."""
+    """Wrapper pour compatibilite avec main.py — appelle classify_all en interne."""
     all_results = classify_all(all_features)
     idx = all_features.index(features)
     if idx < len(all_results):
@@ -168,4 +189,5 @@ def classify_piece(features, all_features):
 
 
 def get_coin_value(label):
+    """Retourne la valeur en euros d'un label de piece."""
     return COIN_VALUES_EUR.get(label, 0.0)

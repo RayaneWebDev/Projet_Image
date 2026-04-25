@@ -18,12 +18,15 @@ COLOR_RANGES = {
 
 def compute_ring_features(crop, n_bins=16):
     """
-    Découpe le crop en 3 anneaux concentriques (centre/milieu/bord)
-    et calcule pour chaque anneau un histogramme HSV + gradient Sobel.
-    Retourne un vecteur numpy de taille 3 * 4 * n_bins = 192.
+    Decoupe le crop en 3 anneaux concentriques (centre/milieu/bord)
+    et calcule pour chaque anneau :
+      - histogramme H, S, V (espace HSV)
+      - histogramme magnitude gradient Sobel
+      - histogramme direction gradient Sobel (invariant a la rotation)
+    Retourne un vecteur numpy de taille 3 * 5 * n_bins = 240.
     """
     if crop is None or crop.size == 0:
-        return np.zeros(3 * 4 * n_bins)
+        return np.zeros(3 * 5 * n_bins)
 
     h, w   = crop.shape[:2]
     cx, cy = w // 2, h // 2
@@ -32,10 +35,13 @@ def compute_ring_features(crop, n_bins=16):
     hsv  = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
-    gx  = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-    gy  = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
-    mag = cv2.magnitude(gx, gy)
-    mag = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    # Gradient Sobel : magnitude et direction
+    gx    = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gy    = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    mag   = cv2.magnitude(gx, gy)
+    angle = cv2.phase(gx, gy, angleInDegrees=True)
+    mag   = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    angle = (angle % 180).astype(np.uint8)  # 0-180 degres, invariant rotation
 
     rings = [(0.0, 0.3), (0.3, 0.6), (0.6, 1.0)]
     feature_vec = []
@@ -44,19 +50,23 @@ def compute_ring_features(crop, n_bins=16):
         r_min  = int(r_min_ratio * r_max)
         r_max_ = int(r_max_ratio * r_max)
 
+        # Masque de l'anneau = disque externe - disque interne
         mask_outer = np.zeros((h, w), dtype=np.uint8)
         mask_inner = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(mask_outer, (cx, cy), r_max_, 255, -1)
         if r_min > 0:
             cv2.circle(mask_inner, (cx, cy), r_min, 255, -1)
         mask_ring  = cv2.subtract(mask_outer, mask_inner)
+
+        # Exclure le fond noir du crop circulaire
         mask_valid = cv2.inRange(crop, (10, 10, 10), (255, 255, 255))
         mask_ring  = cv2.bitwise_and(mask_ring, mask_valid)
 
         if np.count_nonzero(mask_ring) == 0:
-            feature_vec.extend([0.0] * (4 * n_bins))
+            feature_vec.extend([0.0] * (5 * n_bins))
             continue
 
+        # Histogrammes H, S, V normalises
         for channel, (c_min, c_max) in enumerate([(0, 180), (0, 256), (0, 256)]):
             hist = cv2.calcHist([hsv], [channel], mask_ring, [n_bins], [c_min, c_max])
             hist = hist.flatten().astype(float)
@@ -64,17 +74,28 @@ def compute_ring_features(crop, n_bins=16):
                 hist /= hist.sum()
             feature_vec.extend(hist.tolist())
 
+        # Histogramme magnitude gradient
         hist_g = cv2.calcHist([mag], [0], mask_ring, [n_bins], [0, 256])
         hist_g = hist_g.flatten().astype(float)
         if hist_g.sum() > 0:
             hist_g /= hist_g.sum()
         feature_vec.extend(hist_g.tolist())
 
+        # Histogramme direction gradient
+        hist_a = cv2.calcHist([angle], [0], mask_ring, [n_bins], [0, 180])
+        hist_a = hist_a.flatten().astype(float)
+        if hist_a.sum() > 0:
+            hist_a /= hist_a.sum()
+        feature_vec.extend(hist_a.tolist())
+
     return np.array(feature_vec)
 
 
 def classify_color(crop):
-    """Classe le crop en bronze / gold / silver par seuillage HSV."""
+    """
+    Classe le crop en bronze / gold / silver par seuillage HSV.
+    Retourne 'unknown' si aucune couleur n'atteint le seuil de 15%.
+    """
     if crop is None or crop.size == 0:
         return "unknown"
 
@@ -99,11 +120,12 @@ def classify_color(crop):
 
 def extract_features(circles, image):
     """
-    Pour chaque cercle détecté, extrait :
-    - crop circulaire masqué
-    - couleur HSV (bronze/gold/silver)
-    - diamètre corrigé (ellipse + biais HoughCircles ×1.15)
-    - vecteur ring_features pour le k-NN
+    Pour chaque cercle detecte, extrait :
+      - crop circulaire masque (fond noir)
+      - couleur HSV (bronze / gold / silver)
+      - diametre corrige via fitEllipse + biais HoughCircles x1.15
+      - vecteur ring_features (240 dims) pour le k-NN
+    Retourne (features_list, image_annotee).
     """
     image_out     = image.copy()
     features_list = []
@@ -115,6 +137,7 @@ def extract_features(circles, image):
         y2 = min(cy + r, image.shape[0])
         crop = image[y:y2, x:x2].copy()
 
+        # Masque circulaire : met le fond en noir
         mask = np.zeros(crop.shape[:2], dtype=np.uint8)
         cv2.circle(mask, (r, r), r, 255, -1)
         crop_circle = cv2.bitwise_and(crop, crop, mask=mask)
@@ -122,12 +145,12 @@ def extract_features(circles, image):
         color_label   = classify_color(crop_circle)
         ring_features = compute_ring_features(crop_circle)
 
-        # Correction perspective par ellipse
+        # Correction perspective : fitEllipse sur contours + biais x1.15
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
         contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        diameter      = float(r * 2 * 1.15)  # ×1.15 : correction biais HoughCircles
+        diameter      = float(r * 2 * 1.15)  # fallback sans ellipse
         ellipse_ratio = 1.0
 
         if contours:
