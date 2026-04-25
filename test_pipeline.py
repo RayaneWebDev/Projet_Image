@@ -10,11 +10,6 @@ IOU_THRESHOLD = 0.5
 
 def test_dataset(test_dir, ann_dir,
                  save_dir="output_test"):
-    """
-    Teste le pipeline sur la base test.
-    Affiche détections + erreur monetaire par image.
-    Sauvegarde les images annotées dans save_dir.
-    """
     os.makedirs(save_dir, exist_ok=True)
 
     image_ext = {".jpg", ".jpeg", ".png", ".bmp"}
@@ -54,12 +49,12 @@ def test_dataset(test_dir, ann_dir,
 
         pred_total = sum(
             COIN_VALUES_EUR.get(normalize_label(lbl), 0)
-            for _, _, _, lbl, _ in detects
+            for _, _, _, lbl, _, _ in detects
         )
         total_pred_eur += pred_total
 
         print(f"\n  {fname}")
-        for cx, cy, r, lbl, conf in detects:
+        for cx, cy, r, lbl, d_mm, conf in detects:
             norm_lbl = normalize_label(lbl)
             val      = COIN_VALUES_EUR.get(norm_lbl, 0)
             print(f"    {norm_lbl:<10} {conf*100:.0f}%   {val:.2f}€")
@@ -72,7 +67,7 @@ def test_dataset(test_dir, ann_dir,
                            for _, _, _, l in gt)
             total_gt_eur += gt_total
 
-            dets = [(cx, cy, r, lbl) for cx, cy, r, lbl, _ in detects]
+            dets = [(cx, cy, r, lbl) for cx, cy, r, lbl, _, _ in detects]
             m    = compute_metrics(dets, gt, IOU_THRESHOLD)
             all_tp += m["TP"]
             all_fp += m["FP"]
@@ -91,7 +86,7 @@ def test_dataset(test_dir, ann_dir,
         # Sauvegarder image annotée
         _save_test_image(img, detects, os.path.join(save_dir, fname))
 
-    # ── Résumé global ────────────────────────────────────────────
+    # ── Résumé global ─────────────────────────────────────────────
     total_gt_annot = all_tp + all_fn
     g_prec  = all_tp / (all_tp + all_fp) if (all_tp + all_fp) > 0 else 0.0
     g_rec   = all_tp / total_gt_annot     if total_gt_annot > 0   else 0.0
@@ -115,7 +110,7 @@ def test_dataset(test_dir, ann_dir,
 def _save_test_image(img, detects, path):
     out   = img.copy()
     total = 0.0
-    for cx, cy, r, lbl, conf in detects:
+    for cx, cy, r, lbl, d_mm, conf in detects:
         norm_lbl = normalize_label(lbl)
         val      = COIN_VALUES_EUR.get(norm_lbl, 0)
         total   += val

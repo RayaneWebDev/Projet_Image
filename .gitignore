@@ -2,3 +2,6 @@ venv/
 __pycache__/
 *.pyc
 .idea/
+output_test/
+output_validation/
+*.pkl
