@@ -16,6 +16,15 @@ COLOR_RANGES = {
 }
 
 
+def _equalize_v(crop):
+    """Egalisation d'histogramme globale sur le canal V (HSV)."""
+    if crop is None or crop.size == 0:
+        return crop
+    hsv          = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    hsv[:, :, 2] = cv2.equalizeHist(hsv[:, :, 2])
+    return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+
 def compute_ring_features(crop, n_bins=16):
     """
     Decoupe le crop en 3 anneaux concentriques (centre/milieu/bord)
@@ -28,6 +37,9 @@ def compute_ring_features(crop, n_bins=16):
     if crop is None or crop.size == 0:
         return np.zeros(3 * 5 * n_bins)
 
+    # Egalisation histogramme sur V avant extraction des features
+    crop = _equalize_v(crop)
+
     h, w   = crop.shape[:2]
     cx, cy = w // 2, h // 2
     r_max  = min(cx, cy)
@@ -35,13 +47,21 @@ def compute_ring_features(crop, n_bins=16):
     hsv  = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
+    # Normalisation z-score sur le crop gris
+    mu    = float(gray.mean())
+    sigma = float(gray.std())
+    if sigma > 0:
+        gray = np.clip(
+            (gray.astype(float) - mu) / sigma * 64 + 128, 0, 255
+        ).astype(np.uint8)
+
     # Gradient Sobel : magnitude et direction
     gx    = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     gy    = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
     mag   = cv2.magnitude(gx, gy)
     angle = cv2.phase(gx, gy, angleInDegrees=True)
     mag   = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    angle = (angle % 180).astype(np.uint8)  # 0-180 degres, invariant rotation
+    angle = (angle % 180).astype(np.uint8)
 
     rings = [(0.0, 0.3), (0.3, 0.6), (0.6, 1.0)]
     feature_vec = []
@@ -145,12 +165,12 @@ def extract_features(circles, image):
         color_label   = classify_color(crop_circle)
         ring_features = compute_ring_features(crop_circle)
 
-        # Correction perspective : fitEllipse sur contours + biais x1.15
+        # Correction perspective : fitEllipse + biais x1.15
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
         contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        diameter      = float(r * 2 * 1.15)  # fallback sans ellipse
+        diameter      = float(r * 2 * 1.15)
         ellipse_ratio = 1.0
 
         if contours:

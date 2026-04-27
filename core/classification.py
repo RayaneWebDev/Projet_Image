@@ -17,23 +17,26 @@ COLOR_CANDS = {
 
 
 def _load_knn():
-    """Charge la base k-NN depuis le fichier .npy. Retourne (X, y) ou (None, None)."""
+    """Charge la base k-NN et calcule les stats de normalisation."""
     if not os.path.exists(KNN_DB_PATH):
-        return None, None
+        return None, None, None, None
     try:
         data = np.load(KNN_DB_PATH, allow_pickle=True).item()
-        return data["X"].astype(np.float32), data["y"]
+        X    = data["X"].astype(np.float32)
+        y    = data["y"]
+        # Moyenne et écart-type par feature sur la base d'entraînement
+        mu   = X.mean(axis=0)
+        sigma = X.std(axis=0)
+        sigma[sigma == 0] = 1.0  # éviter division par zéro
+        return X, y, mu, sigma
     except Exception:
-        return None, None
+        return None, None, None, None
 
-_KNN_X, _KNN_Y = _load_knn()
+_KNN_X, _KNN_Y, _KNN_MU, _KNN_SIGMA = _load_knn()
 
 
 def _knn_predict(ring_features, color, k=5):
-    """
-    k-NN pondere par distance inverse, restreint aux candidats de la couleur.
-    Retourne (label_predit, confiance) ou (None, 0.0) si indisponible.
-    """
+    """k-NN pondéré par distance, avec normalisation z-score des features."""
     if _KNN_X is None or ring_features is None:
         return None, 0.0
 
@@ -45,14 +48,16 @@ def _knn_predict(ring_features, color, k=5):
     X_filt = _KNN_X[mask]
     y_filt = _KNN_Y[mask]
 
-    q     = ring_features.astype(np.float32).flatten()
-    dists = np.sqrt(((X_filt - q) ** 2).sum(axis=1))
+    # Normalisation z-score : centrer et réduire
+    X_norm = (X_filt - _KNN_MU) / _KNN_SIGMA
+    q_norm = (ring_features.astype(np.float32).flatten() - _KNN_MU) / _KNN_SIGMA
+
+    dists = np.sqrt(((X_norm - q_norm) ** 2).sum(axis=1))
 
     k_eff     = min(k, len(dists))
     idx       = np.argsort(dists)[:k_eff]
     neighbors = y_filt[idx]
 
-    # Vote pondere par 1/distance
     votes = {}
     for lbl, d in zip(neighbors, dists[idx]):
         w = 1.0 / (d + 1e-6)

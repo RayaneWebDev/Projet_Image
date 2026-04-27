@@ -2,7 +2,9 @@
 Affiche la matrice de confusion et l'accuracy par classe
 sur le jeu de validation.
 """
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 import cv2
 from collections import defaultdict
@@ -58,7 +60,8 @@ all_labels = sorted(set(
     for lbl in [gt_lbl] + list(preds.keys())
 ))
 
-print(f"{'GT \\ PRED':<12}", end="")
+header = "GT \\ PRED"
+print(f"{header:<12}", end="")
 for lbl in all_labels:
     print(f"{lbl:>12}", end="")
 print()
