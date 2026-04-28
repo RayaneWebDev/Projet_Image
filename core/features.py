@@ -40,6 +40,9 @@ def compute_ring_features(crop, n_bins=16):
     # Egalisation histogramme sur V avant extraction des features
     crop = _equalize_v(crop)
 
+    # Filtre moyenneur 3x3 : lisse le crop pour stabiliser les histogrammes
+    crop = cv2.blur(crop, (3, 3))
+
     h, w   = crop.shape[:2]
     cx, cy = w // 2, h // 2
     r_max  = min(cx, cy)
