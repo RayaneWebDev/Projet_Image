@@ -17,7 +17,16 @@ COLOR_CANDS = {
 
 
 def _load_knn():
-    """Charge la base k-NN et calcule les stats de normalisation."""
+    """
+    Charge la base k-NN depuis le fichier .npy et calcule les statistiques
+    de normalisation (moyenne et écart-type par feature).
+
+    La normalisation z-score est précalculée ici une seule fois au chargement
+    pour ne pas la recalculer à chaque prédiction.
+
+    Returns:
+        (X, y, mu, sigma) ou (None, None, None, None) si fichier absent/corrompu
+    """
     if not os.path.exists(KNN_DB_PATH):
         return None, None, None, None
     try:
@@ -36,7 +45,23 @@ _KNN_X, _KNN_Y, _KNN_MU, _KNN_SIGMA = _load_knn()
 
 
 def _knn_predict(ring_features, color, k=5):
-    """k-NN pondéré par distance, avec normalisation z-score des features."""
+    """
+    Prédit le label d'une pièce par k-NN pondéré par distance inverse.
+
+    Seuls les exemples dont le label correspond au groupe couleur détecté
+    sont considérés. Les features sont normalisées en z-score avant le calcul
+    de distance pour équilibrer l'influence de chaque dimension.
+
+    Le vote final pondère chaque voisin par 1/distance : les voisins
+    les plus proches ont donc plus d'influence sur le résultat.
+
+    Args:
+        ring_features: vecteur numpy de features (240 dims)
+        color:         couleur détectée ('bronze', 'gold', 'silver', 'unknown')
+        k:             nombre de voisins à considérer
+    Returns:
+        (label_prédit, confiance) ou (None, 0.0) si base indisponible
+    """
     if _KNN_X is None or ring_features is None:
         return None, 0.0
 
@@ -71,9 +96,17 @@ def _knn_predict(ring_features, color, k=5):
 
 def _detect_bimetal(crop):
     """
-    Detecte si une piece est bimetal en comparant la saturation HSV
-    du centre (20% du rayon) vs l'anneau intermediaire (35-44% du rayon).
-    Retourne (is_bimetal, diff_saturation).
+    Détecte si une pièce est bimétal en comparant la saturation HSV
+    du centre (20% du rayon) vs l'anneau intermédiaire (35-44% du rayon).
+
+    Les pièces bimétal (1€ et 2€) ont un centre de couleur différente
+    de leur anneau extérieur, créant une différence de saturation mesurable.
+    Seuils calibrés empiriquement sur data/validation.
+
+    Args:
+        crop: image BGR (crop circulaire de la pièce)
+    Returns:
+        (is_bimetal, diff_saturation)
     """
     if crop is None or crop.size == 0:
         return False, 0.0
@@ -109,10 +142,27 @@ def _detect_bimetal(crop):
 
 def classify_all(features_list):
     """
-    Classifie toutes les pieces d'une image en deux etapes :
-      1. Scale factor global contraint par couleur -> label diametre
-      2. k-NN sur ring_features -> correction si confiance suffisante
-    Retourne une liste de (label, d_mm, confiance).
+    Classifie toutes les pièces d'une image en deux étapes :
+
+    Étape 1 — Scale factor global contraint par couleur :
+        Cherche sf tel que diameter_px * sf ≈ diameter_mm pour toutes les pièces.
+        Minimise l'erreur totale en testant toutes les hypothèses de référence,
+        contraintes par couleur (ex: une pièce bronze ne peut référencer que 1/2/5ct).
+
+    Étape 2 — Correction par k-NN :
+        Pour gold et silver, le k-NN est prioritaire sur le scale factor
+        si sa confiance dépasse un seuil (0.60 pour gold, 0.55 pour silver).
+        Pour bronze et unknown, le scale factor seul est utilisé.
+
+    Cas spécial 2€ :
+        Le 2€ est souvent détecté gold à cause de son anneau doré.
+        Si bimétal détecté sur une pièce gold -> reclassement silver.
+        Séparation finale 1€/2€ par diamètre estimé + diff_sat.
+
+    Args:
+        features_list: liste de dicts retournée par extract_features()
+    Returns:
+        liste de (label, d_mm, confiance) dans le même ordre
     """
     if not features_list:
         return []
@@ -177,6 +227,7 @@ def classify_all(features_list):
                 else:
                     final_label = "2 Euro" if diff_sat > 20 else "1 Euro"
 
+        # Confiance basée sur l'écart entre d_mm estimé et le diamètre réel du label
         dist = abs(COIN_DIAMETERS_MM[final_label] - d_mm)
         conf = max(0.3, 1.0 - dist / 5.0)
         results.append((final_label, d_mm, conf))
@@ -185,7 +236,16 @@ def classify_all(features_list):
 
 
 def classify_piece(features, all_features):
-    """Wrapper pour compatibilite avec main.py — appelle classify_all en interne."""
+    """
+    Wrapper pour compatibilité avec main.py.
+    Appelle classify_all() et retourne le résultat de la pièce demandée.
+
+    Args:
+        features:     dict de features d'une pièce
+        all_features: liste complète des features de l'image
+    Returns:
+        (label, d_mm, confiance)
+    """
     all_results = classify_all(all_features)
     idx = all_features.index(features)
     if idx < len(all_results):
@@ -194,5 +254,12 @@ def classify_piece(features, all_features):
 
 
 def get_coin_value(label):
-    """Retourne la valeur en euros d'un label de piece."""
+    """
+    Retourne la valeur en euros d'un label de pièce.
+
+    Args:
+        label: str parmi '1 cent', '2 cent', ..., '2 Euro'
+    Returns:
+        float (ex: 0.50 pour '50 cent'), ou 0.0 si label inconnu
+    """
     return COIN_VALUES_EUR.get(label, 0.0)

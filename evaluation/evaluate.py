@@ -169,10 +169,10 @@ def evaluate_dataset(val_dir, ann_dir, iou_threshold=IOU_THRESHOLD, save_dir=Non
     print(f"  RESULTATS GLOBAUX ({len(per_image)} images evaluees)")
     print(f"{'='*65}")
     print(f"  TP={all_tp}  FP={all_fp}  FN={all_fn}")
-    _print_metric("Precision",      g_prec,    SUCCESS_PRECISION)
+    _print_metric("Précision",      g_prec,    SUCCESS_PRECISION)
     _print_metric("Rappel",         g_recall,  SUCCESS_RECALL)
     _print_metric("F1-score",       g_f1,      None)
-    _print_metric("Label accuracy", g_lbl_acc, SUCCESS_LABEL_ACC)
+    _print_metric("Précision de classification", g_lbl_acc, SUCCESS_LABEL_ACC)
     verdict = "VALIDATION REUSSIE" if success else "VALIDATION ECHOUEE"
     print(f"\n  VERDICT : {verdict}")
     print(f"{'='*65}\n")
