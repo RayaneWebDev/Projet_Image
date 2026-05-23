@@ -8,10 +8,10 @@ import numpy as np
 # Les pièces silver (1€/2€) ont une très faible saturation (gris).
 COLOR_RANGES = {
     "bronze": [
-        (0,   15, 60, 255, 40, 210),
-        (165, 180, 60, 255, 40, 210),  # zone rouge côté 180° de la roue HSV
+        (0,   17, 60, 255, 40, 240),
+        (165, 180, 60, 255, 40, 240),  # zone rouge côté 180° de la roue HSV
     ],
-    "gold":   [(15, 40, 40, 220, 60, 255)],
+    "gold":   [(17, 40, 40, 220, 60, 255)],
     "silver": [(0, 180,  0,  45, 50, 255)],
 }
 
