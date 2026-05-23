@@ -222,6 +222,7 @@ def classify_all(features_list):
                 best_sf  = sf
     sf = best_sf or 0.1
 
+
     results = []
     for feat in features_list:
         d_mm  = feat["diameter_pixels"] * sf
@@ -249,7 +250,7 @@ def classify_all(features_list):
 
         # k-NN prioritaire si confiance suffisante, sinon scale factor
         # Pour silver (1€/2€) : k-NN toujours utilisé car scale factor peu fiable (2.5mm)
-        if color == "gold" and knn_label is not None and knn_conf > 0.60:
+        if color == "gold" and knn_label is not None and knn_conf > 0.50:
             final_label = knn_label
         elif color == "bronze" and knn_label is not None and knn_conf > 1.0:
             final_label = knn_label
