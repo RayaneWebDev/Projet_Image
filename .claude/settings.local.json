@@ -5,7 +5,9 @@
       "Bash(python training/build_knn_profiles.py)",
       "Bash(python \"d:/ImageGroupe/Projet_Image/training/build_knn_profiles.py\")",
       "Bash(python -c \"import numpy as np; d=np.load\\('d:/ImageGroupe/Projet_Image/model/knn_database.npy',allow_pickle=True\\).item\\(\\); print\\('X shape:', d['X'].shape\\)\")",
-      "PowerShell(python -c \"import numpy as np; d = np.load\\('d:/ImageGroupe/Projet_Image/model/knn_database.npy', allow_pickle=True\\).item\\(\\); print\\('Shape:', d['X'].shape\\)\")"
+      "PowerShell(python -c \"import numpy as np; d = np.load\\('d:/ImageGroupe/Projet_Image/model/knn_database.npy', allow_pickle=True\\).item\\(\\); print\\('Shape:', d['X'].shape\\)\")",
+      "Bash(python run_evaluate_rf.py)",
+      "Bash(python -c ' *)"
     ]
   }
 }

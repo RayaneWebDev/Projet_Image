@@ -6,11 +6,11 @@ Random Forest a la place du k-NN.
 import cv2
 import numpy as np
 import os
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier
 from core.utils import COIN_DIAMETERS_MM, COIN_VALUES_EUR
 
 KNN_DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "model", "knn_database.npy"
+    os.path.dirname(os.path.dirname(__file__)), "model", "knn_database_rf.npy"
 )
 
 COLOR_CANDS = {
@@ -36,6 +36,7 @@ def _load_rf():
     except Exception:
         return None
 
+    _SEEDS = {"bronze": 0, "gold": 100, "silver": 100, "unknown": 42}
     models = {}
     for color, cands in COLOR_CANDS.items():
         mask = np.array([lbl in cands for lbl in y])
@@ -44,14 +45,13 @@ def _load_rf():
         X_filt = X[mask]
         y_filt = y[mask]
 
-        rf = RandomForestClassifier(
+        clf = ExtraTreesClassifier(
             n_estimators=200,
-            max_depth=10,
             class_weight="balanced",
-            random_state=42
+            random_state=_SEEDS.get(color, 42)
         )
-        rf.fit(X_filt, y_filt)
-        models[color] = rf
+        clf.fit(X_filt, y_filt)
+        models[color] = clf
 
     return models if models else None
 
@@ -79,12 +79,12 @@ def _rf_predict(ring_features, color):
     return label, conf
 
 
-def _detect_bimetal(crop):
+def _detect_bimetal(crop, diff_sat_thr=18):
     """
     Detecte si une piece est bimetal en comparant la saturation HSV
     du centre (20% du rayon) vs l'anneau intermediaire (35-44% du rayon).
-    Seuils calibres empiriquement sur data/validation.
-    Retourne (is_bimetal, diff_saturation).
+    diff_sat_thr: seuil de saturation (18 par defaut, 25+ pour gold->silver).
+    Retourne (is_bimetal, sat_sign).
     """
     if crop is None or crop.size == 0:
         return False, 0.0
@@ -111,8 +111,9 @@ def _detect_bimetal(crop):
     val_r    = cv2.mean(hsv[:, :, 2], mask=mask_r)[0]
     diff_sat = abs(sat_c - sat_r)
     diff_val = abs(val_c - val_r)
+    sat_sign = sat_c - sat_r  # >0: centre doré→2€, <0: centre argenté→1€
 
-    return (diff_sat > 15) and (diff_val > 10), diff_sat
+    return (diff_sat > diff_sat_thr) and (diff_val > 10), sat_sign
 
 
 def classify_all_rf(features_list):
@@ -124,16 +125,40 @@ def classify_all_rf(features_list):
     if not features_list:
         return []
 
+    # Cas pièce unique : SF trivial, utiliser RF tous candidats
+    if len(features_list) == 1:
+        feat  = features_list[0]
+        rf_f  = feat.get("ring_features")
+        crop  = feat.get("crop_cv2")
+        color = feat.get("color_label", "unknown")
+
+        rf_label, rf_conf = _rf_predict(rf_f, "unknown")
+        if rf_label is None:
+            cands     = COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys()))
+            rf_label  = cands[0]
+            rf_conf   = 0.0
+
+        final_label = rf_label
+
+        if final_label in ["1 Euro", "2 Euro"] and crop is not None:
+            is_bimetal, sat_sign = _detect_bimetal(crop)
+            if is_bimetal:
+                final_label = "2 Euro" if sat_sign > 0 else "1 Euro"
+
+        d_mm = COIN_DIAMETERS_MM[final_label]
+        conf = max(0.3, rf_conf)
+        return [(final_label, d_mm, conf)]
+
     diam_px    = [f["diameter_pixels"] for f in features_list]
     color_labs = [f.get("color_label", "unknown") for f in features_list]
 
-    # Scale factor global contraint par couleur
+    # Scale factor global contraint par couleur (erreur relative)
     best_sf, best_err = None, float("inf")
     for d, color in zip(diam_px, color_labs):
         for ref_label in COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys())):
             sf        = COIN_DIAMETERS_MM[ref_label] / d
             total_err = sum(
-                min(abs(COIN_DIAMETERS_MM[l] - d2 * sf)
+                min(abs(COIN_DIAMETERS_MM[l] - d2 * sf) / COIN_DIAMETERS_MM[l]
                     for l in COLOR_CANDS.get(c2, list(COIN_DIAMETERS_MM.keys())))
                 for d2, c2 in zip(diam_px, color_labs)
             )
@@ -150,7 +175,13 @@ def classify_all_rf(features_list):
         rf    = feat.get("ring_features")
         cands = COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys()))
 
+        # Petites pièces bronze parfois détectées silver (usure) → reclasser unknown
+        if color == "silver" and d_mm < 20.0:
+            color = "unknown"
+            cands = COLOR_CANDS["unknown"]
+
         # Reclassement gold -> silver si bimetal detecte (cas 2€)
+        # Garde d_mm >= 22mm : 20ct (22.25mm) ne peut pas etre silver (1€=23.25, 2€=25.75)
         if color == "gold" and crop is not None:
             is_bimetal, _ = _detect_bimetal(crop)
             if is_bimetal:
@@ -161,23 +192,20 @@ def classify_all_rf(features_list):
         rf_label, rf_conf = _rf_predict(rf, color)
 
         # RF prioritaire si confiance suffisante, sinon scale factor
-        if color == "gold" and rf_label is not None and rf_conf > 0.60:
+        if color == "gold" and rf_label is not None and rf_conf > 0.50:
             final_label = rf_label
-        elif color == "silver" and rf_label is not None and rf_conf > 0.55:
+        elif color == "silver" and rf_label is not None:
+            final_label = rf_label
+        elif color == "bronze" and rf_label is not None and rf_conf > 0.60:
             final_label = rf_label
         else:
             final_label = sf_label
 
-        # Separation 1€/2€ par bimetal + diametre
+        # Separation 1€/2€ par bimetal : sat_sign > 0 = centre doré = 2€
         if final_label in ["1 Euro", "2 Euro"] and crop is not None:
-            is_bimetal, diff_sat = _detect_bimetal(crop)
+            is_bimetal, sat_sign = _detect_bimetal(crop)
             if is_bimetal:
-                if d_mm > 24.8:
-                    final_label = "2 Euro"
-                elif d_mm < 22.0:
-                    final_label = "1 Euro"
-                else:
-                    final_label = "2 Euro" if diff_sat > 20 else "1 Euro"
+                final_label = "2 Euro" if sat_sign > 0 else "1 Euro"
 
         dist = abs(COIN_DIAMETERS_MM[final_label] - d_mm)
         conf = max(0.3, 1.0 - dist / 5.0)
