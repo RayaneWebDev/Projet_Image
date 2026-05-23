@@ -8,15 +8,15 @@ def segment_piece(image):
     max_r = int(min(h, w) * 0.28)
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (9, 9), 2)
+    gray = cv2.GaussianBlur(gray, (11, 11), 3)
 
     circles = cv2.HoughCircles(
         gray,
         cv2.HOUGH_GRADIENT,
         dp=1.2,
-        minDist=int(min_r * 4),
+        minDist=int(min_r * 2),
         param1=100,
-        param2=70,
+        param2=55,
         minRadius=min_r,
         maxRadius=max_r
     )

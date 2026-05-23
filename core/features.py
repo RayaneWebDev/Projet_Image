@@ -64,15 +64,20 @@ def compute_ring_features(crop, n_bins=16):
     Returns:
         vecteur numpy de taille 3 * 5 * n_bins = 240
     """
+    _TARGET = 128
     if crop is None or crop.size == 0:
         return np.zeros(3 * 5 * n_bins)
 
     crop = _equalize_v(crop)
     crop = cv2.blur(crop, (3, 3))
 
-    h, w   = crop.shape[:2]
-    cx, cy = w // 2, h // 2
-    r_max  = min(cx, cy)
+    # Normalisation à taille fixe : uniformise la résolution entre petites/grandes pièces
+    if crop.shape[0] != _TARGET or crop.shape[1] != _TARGET:
+        crop = cv2.resize(crop, (_TARGET, _TARGET), interpolation=cv2.INTER_AREA)
+
+    h, w   = _TARGET, _TARGET
+    cx, cy = _TARGET // 2, _TARGET // 2
+    r_max  = _TARGET // 2
 
     hsv  = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -85,8 +90,6 @@ def compute_ring_features(crop, n_bins=16):
             (gray.astype(float) - mu) / sigma * 64 + 128, 0, 255
         ).astype(np.uint8)
 
-    # Gradient Sobel : magnitude (intensité du contour)
-    #                  et direction (orientation, invariante par modulo 180°)
     gx    = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     gy    = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
     mag   = cv2.normalize(cv2.magnitude(gx, gy), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
@@ -208,32 +211,17 @@ def extract_features(circles, image):
         color_label   = classify_color(crop_circle)
         ring_features = compute_ring_features(crop_circle)
 
-        # Estimation du diamètre par fitEllipse sur le contour du crop brut
-        # (pas crop_circle, pour avoir un contour plus net sur le bord réel)
-        # Correction perspective : morphologie + fitEllipse + biais x1.15
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Correction perspective : fitEllipse + biais x1.15
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Binarisation Otsu
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # Element structurant elliptique adapte aux pieces circulaires
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-
-    # Fermeture : bouche les trous dans le masque de la piece
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-
-    # Ouverture : supprime les artefacts parasites autour de la piece
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        diameter      = float(r * 2 * 1.15)  # fallback si pas d'ellipse
-        ellipse_ratio = 1.0                   # rapport petit/grand axe (1.0 = cercle parfait)
+        diameter      = float(r * 2 * 1.15)
+        ellipse_ratio = 1.0
 
         if contours:
             cnt = max(contours, key=cv2.contourArea)
-            if len(cnt) >= 5:  # fitEllipse requiert au moins 5 points
+            if len(cnt) >= 5:
                 (_, _), (major, minor), _ = cv2.fitEllipse(cnt)
                 diameter      = max(major, minor) * 1.15
                 ellipse_ratio = min(major, minor) / max(major, minor)

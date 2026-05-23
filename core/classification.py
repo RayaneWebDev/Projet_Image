@@ -136,8 +136,10 @@ def _detect_bimetal(crop):
     diff_sat = abs(sat_c - sat_r)
     diff_val = abs(val_c - val_r)
 
-    # Seuils calibres empiriquement sur data/validation
-    return (diff_sat > 15) and (diff_val > 10), diff_sat
+    # sat_sign > 0 : centre plus saturé que anneau → centre doré → 2€
+    # sat_sign < 0 : centre moins saturé que anneau → centre argenté → 1€
+    sat_sign = sat_c - sat_r
+    return (diff_sat > 18) and (diff_val > 10), sat_sign
 
 
 def classify_all(features_list):
@@ -154,6 +156,10 @@ def classify_all(features_list):
         si sa confiance dépasse un seuil (0.60 pour gold, 0.55 pour silver).
         Pour bronze et unknown, le scale factor seul est utilisé.
 
+    Cas spécial pièce unique :
+        Le scale factor est trivial (erreur=0 pour tout candidat), donc inutilisable.
+        On utilise directement le k-NN sans contrainte de couleur (tous candidats).
+
     Cas spécial 2€ :
         Le 2€ est souvent détecté gold à cause de son anneau doré.
         Si bimétal détecté sur une pièce gold -> reclassement silver.
@@ -167,6 +173,34 @@ def classify_all(features_list):
     if not features_list:
         return []
 
+    # --- Cas spécial : pièce unique ---
+    # Le scale factor est trivial (erreur = 0 pour tous les candidats),
+    # donc on utilise directement le k-NN sans contrainte de couleur.
+    if len(features_list) == 1:
+        feat  = features_list[0]
+        rf    = feat.get("ring_features")
+        crop  = feat.get("crop_cv2")
+        color = feat.get("color_label", "unknown")
+
+        knn_label, knn_conf = _knn_predict(rf, "unknown", k=1)
+
+        if knn_label is None:
+            cands     = COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys()))
+            knn_label = cands[0]
+            knn_conf  = 0.0
+
+        final_label = knn_label
+
+        # Raffinement 1€/2€ par bimetal : sat_sign > 0 = centre doré = 2€
+        if final_label in ["1 Euro", "2 Euro"] and crop is not None:
+            is_bimetal, sat_sign = _detect_bimetal(crop)
+            if is_bimetal:
+                final_label = "2 Euro" if sat_sign > 0 else "1 Euro"
+
+        d_mm = COIN_DIAMETERS_MM[final_label]
+        conf = max(0.3, knn_conf)
+        return [(final_label, d_mm, conf)]
+
     diam_px    = [f["diameter_pixels"] for f in features_list]
     color_labs = [f.get("color_label", "unknown") for f in features_list]
 
@@ -179,7 +213,7 @@ def classify_all(features_list):
         for ref_label in COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys())):
             sf        = COIN_DIAMETERS_MM[ref_label] / d
             total_err = sum(
-                min(abs(COIN_DIAMETERS_MM[l] - d2 * sf)
+                min(abs(COIN_DIAMETERS_MM[l] - d2 * sf) / COIN_DIAMETERS_MM[l]
                     for l in COLOR_CANDS.get(c2, list(COIN_DIAMETERS_MM.keys())))
                 for d2, c2 in zip(diam_px, color_labs)
             )
@@ -196,6 +230,11 @@ def classify_all(features_list):
         rf    = feat.get("ring_features")
         cands = COLOR_CANDS.get(color, list(COIN_DIAMETERS_MM.keys()))
 
+        # Petites pièces bronze parfois détectées silver (usure) → reclasser unknown
+        if color == "silver" and d_mm < 20.0:
+            color = "unknown"
+            cands = COLOR_CANDS["unknown"]
+
         # 2€ souvent detecte gold a cause de son anneau dore -> reclasser silver
         if color == "gold" and crop is not None:
             is_bimetal, _ = _detect_bimetal(crop)
@@ -205,27 +244,25 @@ def classify_all(features_list):
 
         # Label par scale factor (nearest neighbor sur diametre)
         sf_label            = min(cands, key=lambda c: abs(COIN_DIAMETERS_MM[c] - d_mm))
-        knn_label, knn_conf = _knn_predict(rf, color, k=5)
+        k_val               = 1 if color == "silver" else 5
+        knn_label, knn_conf = _knn_predict(rf, color, k=k_val)
 
         # k-NN prioritaire si confiance suffisante, sinon scale factor
+        # Pour silver (1€/2€) : k-NN toujours utilisé car scale factor peu fiable (2.5mm)
         if color == "gold" and knn_label is not None and knn_conf > 0.60:
             final_label = knn_label
-        elif color == "silver" and knn_label is not None and knn_conf > 0.55:
+        elif color == "bronze" and knn_label is not None and knn_conf > 1.0:
+            final_label = knn_label
+        elif color == "silver" and knn_label is not None:
             final_label = knn_label
         else:
             final_label = sf_label
 
-        # Separation 1€/2€ par bimetal + diametre
-        # 2€ = 25.75mm, 1€ = 23.25mm -> seuil a 24.8mm
+        # Separation 1€/2€ par bimetal : sat_sign > 0 = centre doré = 2€
         if final_label in ["1 Euro", "2 Euro"] and crop is not None:
-            is_bimetal, diff_sat = _detect_bimetal(crop)
+            is_bimetal, sat_sign = _detect_bimetal(crop)
             if is_bimetal:
-                if d_mm > 24.8:
-                    final_label = "2 Euro"
-                elif d_mm < 22.0:
-                    final_label = "1 Euro"
-                else:
-                    final_label = "2 Euro" if diff_sat > 20 else "1 Euro"
+                final_label = "2 Euro" if sat_sign > 0 else "1 Euro"
 
         # Confiance basée sur l'écart entre d_mm estimé et le diamètre réel du label
         dist = abs(COIN_DIAMETERS_MM[final_label] - d_mm)

@@ -44,7 +44,12 @@ def _load_rf():
         X_filt = X[mask]
         y_filt = y[mask]
 
-        rf = RandomForestClassifier(n_estimators=100, random_state=42)
+        rf = RandomForestClassifier(
+            n_estimators=200,
+            max_depth=10,
+            class_weight="balanced",
+            random_state=42
+        )
         rf.fit(X_filt, y_filt)
         models[color] = rf
 

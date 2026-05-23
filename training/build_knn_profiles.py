@@ -84,7 +84,7 @@ for json_file in sorted(os.listdir(ANNOT_DIR)):
                 best_dist = dist
                 best_feat = feat
 
-        if best_feat is not None and best_dist < 500:
+        if best_feat is not None and best_dist < 800:
             rf = best_feat.get("ring_features")
             if rf is not None and rf.sum() > 0:
                 X.append(rf)
