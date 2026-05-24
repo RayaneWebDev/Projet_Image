@@ -9,7 +9,8 @@
       "Bash(python run_evaluate_rf.py)",
       "Bash(python -c ' *)",
       "Read(//d/ImageGroupe/CoinVision/files/**)",
-      "Read(//d/ImageGroupe/CoinVision/images/**)"
+      "Read(//d/ImageGroupe/CoinVision/images/**)",
+      "Bash(python evaluation/diagnostic_labels.py)"
     ]
   }
 }

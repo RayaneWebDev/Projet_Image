@@ -7,7 +7,7 @@
 Système de détection et d'identification automatique de pièces euro dans des images photographiées, développé dans le cadre d'un projet de traitement d'image. Le système implémente deux pipelines distincts : une méthode classique par k-NN et une méthode par apprentissage automatique (ExtraTreesClassifier).
 
 **Auteurs :** Ales Ferhani, Rayane Taouache, Lounes Medjbour, Dania Benhamma  
-**Université Paris Cité — L3 Informatique — 2024-2025**
+**Université Paris Cité — L3 Informatique — 2025-2026**
 
 ---
 
@@ -289,13 +289,4 @@ La principale source d'erreur résiduelle est la confusion au sein du groupe or 
 
 ---
 
-## Auteurs
-
-| Nom | Contributions |
-|-----|--------------|
-| Ales Ferhani | Pipeline de classification, évaluation, interface graphique |
-| Rayane Taouache | Segmentation, extraction de features |
-| Lounes Medjbour | Annotation, tests, documentation |
-| Dania Benhamma | Annotation, tests, rapport |
-
-**Université Paris Cité — L3 Informatique — Module Traitement d'image — 2024-2025**
+**Université Paris Cité — L3 Informatique — Module Traitement d'image — 2025-2026**

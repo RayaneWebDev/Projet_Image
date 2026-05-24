@@ -256,10 +256,12 @@ def classify_all_rf(features_list):
         sf_label          = min(cands, key=lambda c: abs(COIN_DIAMETERS_MM[c] - d_mm))
         rf_label, rf_conf = _rf_predict(rf, color)
 
-        # RF prioritaire si confiance suffisante ; silver toujours SF
-        if color == "gold" and rf_label is not None and rf_conf > 0.50:
+        # RF prioritaire si confiance suffisante
+        if color == "gold" and rf_label is not None and rf_conf > 0.55:
             final_label = rf_label
         elif color == "bronze" and rf_label is not None and rf_conf > 0.60:
+            final_label = rf_label
+        elif color == "silver" and rf_label is not None and rf_conf > 0.55:
             final_label = rf_label
         else:
             final_label = sf_label

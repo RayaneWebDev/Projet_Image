@@ -74,10 +74,12 @@ for json_file in sorted(os.listdir(ANNOT_DIR)):
     if img is None:
         continue
 
-    # Redimensionnement si l'image dépasse 1920 px sur le grand côté
-    h, w = img.shape[:2]
-    if max(h, w) > 1920:
-        img = cv2.resize(img, None, fx=1920 / max(h, w), fy=1920 / max(h, w))
+    # Redimensionnement si l'image dépasse 1920 px sur le grand côté.
+    # On conserve le facteur d'échelle pour aligner les coordonnées d'annotation.
+    h, w  = img.shape[:2]
+    scale = min(1.0, 1920 / max(h, w))
+    if scale < 1.0:
+        img = cv2.resize(img, None, fx=scale, fy=scale)
 
     circles = segment_piece(img)
     feats, _ = extract_features(circles, img)
@@ -90,10 +92,12 @@ for json_file in sorted(os.listdir(ANNOT_DIR)):
             continue
 
         total_annot += 1
-        xs    = [p[0] for p in points]
-        ys    = [p[1] for p in points]
-        cx_gt = (min(xs) + max(xs)) / 2
-        cy_gt = (min(ys) + max(ys)) / 2
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        # Les annotations sont en coordonnées originales → on applique scale
+        # pour les ramener dans le référentiel de l'image redimensionnée
+        cx_gt = (min(xs) + max(xs)) / 2 * scale
+        cy_gt = (min(ys) + max(ys)) / 2 * scale
 
         # Recherche de la détection la plus proche de l'annotation
         best_feat, best_dist = None, float("inf")
@@ -147,9 +151,10 @@ for json_file in sorted(os.listdir(ANNOT_DIR)):
     if img is None:
         continue
 
-    h, w = img.shape[:2]
-    if max(h, w) > 1920:
-        img = cv2.resize(img, None, fx=1920 / max(h, w), fy=1920 / max(h, w))
+    h, w  = img.shape[:2]
+    scale = min(1.0, 1920 / max(h, w))
+    if scale < 1.0:
+        img = cv2.resize(img, None, fx=scale, fy=scale)
 
     circles = segment_piece(img)
     feats, _ = extract_features(circles, img)
@@ -163,8 +168,8 @@ for json_file in sorted(os.listdir(ANNOT_DIR)):
 
         xs    = [p[0] for p in points]
         ys_   = [p[1] for p in points]
-        cx_gt = (min(xs) + max(xs)) / 2
-        cy_gt = (min(ys_) + max(ys_)) / 2
+        cx_gt = (min(xs) + max(xs)) / 2 * scale
+        cy_gt = (min(ys_) + max(ys_)) / 2 * scale
 
         best_feat, best_dist = None, float("inf")
         for feat in feats:

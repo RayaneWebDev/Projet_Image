@@ -107,19 +107,20 @@ def _knn_predict(ring_features, color, k=5):
     return best, conf
 
 
-def _detect_bimetal(crop):
+def _detect_bimetal(crop, diff_sat_thr=18, diff_val_thr=10):
     """
     Détecte si une pièce est bimétal en comparant la saturation HSV
     du centre (20% du rayon) vs l'anneau intermédiaire (35-44% du rayon).
 
     Les pièces bimétal (1€ et 2€) ont un centre de couleur différente
     de leur anneau extérieur, créant une différence de saturation mesurable.
-    Seuils calibrés empiriquement sur data/validation.
 
     Args:
-        crop: image BGR (crop circulaire de la pièce)
+        crop:         image BGR (crop circulaire de la pièce)
+        diff_sat_thr: seuil minimum de différence de saturation (défaut 18)
+        diff_val_thr: seuil minimum de différence de luminosité (défaut 10)
     Returns:
-        (is_bimetal, diff_saturation)
+        (is_bimetal, sat_sign) où sat_sign > 0 indique un centre doré (→ 2€)
     """
     if crop is None or crop.size == 0:
         return False, 0.0
@@ -130,11 +131,9 @@ def _detect_bimetal(crop):
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     ctr = (w // 2, h // 2)
 
-    # Masque centre
     mask_c = np.zeros((h, w), dtype=np.uint8)
     cv2.circle(mask_c, ctr, int(w * 0.20), 255, -1)
 
-    # Masque anneau intermediaire
     mask_r = np.zeros((h, w), dtype=np.uint8)
     cv2.circle(mask_r, ctr, int(w * 0.44), 255, -1)
     cv2.circle(mask_r, ctr, int(w * 0.35),   0, -1)
@@ -152,7 +151,7 @@ def _detect_bimetal(crop):
     # sat_sign > 0 : centre plus saturé que anneau → centre doré → 2€
     # sat_sign < 0 : centre moins saturé que anneau → centre argenté → 1€
     sat_sign = sat_c - sat_r
-    return (diff_sat > 18) and (diff_val > 10), sat_sign
+    return (diff_sat > diff_sat_thr) and (diff_val > diff_val_thr), sat_sign
 
 
 def classify_all(features_list):
