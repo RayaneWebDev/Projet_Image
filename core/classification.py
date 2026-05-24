@@ -1,3 +1,16 @@
+"""
+Classification des pièces euro par k-NN pondéré (méthode classique).
+
+Stratégie en deux étapes :
+  1. Scale Factor global (calibration pixel→mm contraint par couleur)
+  2. k-NN sur ring_features pour gold et silver si la confiance est suffisante
+
+La détection bimétal distingue 1€ et 2€ lorsque le scale factor
+est ambigu (seulement 2,5 mm d'écart).
+
+Auteurs : Équipe ImageGroupe
+Date    : 2026
+"""
 import cv2
 import numpy as np
 import os
@@ -221,7 +234,6 @@ def classify_all(features_list):
                 best_err = total_err
                 best_sf  = sf
     sf = best_sf or 0.1
-
 
     results = []
     for feat in features_list:

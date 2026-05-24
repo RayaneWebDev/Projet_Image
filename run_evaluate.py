@@ -1,5 +1,18 @@
+"""
+Évaluation du pipeline de classification classique (k-NN).
+
+Lance evaluate_dataset() sur data/validation avec les annotations JSON
+et affiche précision, rappel et taux d'identification globaux.
+
+Utilisation :
+    python run_evaluate.py
+
+Auteurs : Équipe ImageGroupe
+Date    : 2026
+"""
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from evaluation.evaluate import evaluate_dataset

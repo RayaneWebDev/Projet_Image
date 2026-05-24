@@ -1,11 +1,21 @@
+"""
+Extraction de features pour la reconnaissance de pièces euro.
+
+Fournit :
+  - la classification couleur (bronze / gold / silver) par seuillage HSV,
+  - le calcul des ring_features (vecteur 240-dim HSV + Sobel par anneaux),
+  - l'extraction complète de toutes les pièces d'une image.
+
+Auteurs : Équipe ImageGroupe
+Date    : 2026
+"""
 import cv2
 import numpy as np
 
-# Plages HSV définissant chaque groupe couleur de pièces euro.
-# Format par plage : (H_min, H_max, S_min, S_max, V_min, V_max)
-# Les pièces bronze (1/2/5ct) ont une teinte rouge/orangée avec forte saturation.
-# Les pièces gold (10/20/50ct) ont une teinte jaune/dorée.
-# Les pièces silver (1€/2€) ont une très faible saturation (gris).
+# Plages HSV (H_min, H_max, S_min, S_max, V_min, V_max) par groupe de couleur.
+# Bronze (1/2/5 ct)  : teinte rouge-orangée, forte saturation.
+# Gold   (10/20/50ct): teinte jaune-dorée.
+# Silver (1€/2€)     : très faible saturation (aspect argenté/gris).
 COLOR_RANGES = {
     "bronze": [
         (0,   17, 60, 255, 40, 240),

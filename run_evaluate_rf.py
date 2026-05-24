@@ -1,10 +1,27 @@
-﻿"""
-Evaluation du pipeline avec classification Random Forest.
-Comparer avec run_evaluate.py (k-NN).
+"""
+Évaluation du pipeline de classification ExtraTrees (variante RF).
+
+Parcourt data/validation, classe chaque pièce avec classify_piece_rf()
+et calcule précision, rappel, F1 et taux d'identification globaux.
+Affiche également la matrice de confusion des erreurs de label.
+
+Seuils de validation :
+  - Précision       ≥ 0.75
+  - Rappel          ≥ 0.75
+  - Taux d'identification ≥ 0.70
+
+Comparer les résultats avec run_evaluate.py (pipeline k-NN classique).
+
+Utilisation :
+    python run_evaluate_rf.py
+
+Auteurs : Équipe ImageGroupe
+Date    : 2026
 """
 import os
 import json
 import cv2
+from collections import defaultdict
 
 from core.segmentation import segment_piece
 from core.features import extract_features
@@ -12,6 +29,7 @@ from core.classification_ml import classify_piece_rf
 from evaluation.metrics import compute_metrics
 from evaluation.evaluate import load_annotation
 
+# Seuils de validation
 IOU_THRESHOLD     = 0.3
 SUCCESS_PRECISION = 0.75
 SUCCESS_RECALL    = 0.75
@@ -21,13 +39,14 @@ VAL_DIR = "data/validation"
 ANN_DIR = "annotation"
 
 image_ext = {".jpg", ".jpeg", ".png", ".bmp"}
-files     = sorted([f for f in os.listdir(VAL_DIR)
-                    if os.path.splitext(f)[1].lower() in image_ext])
+files     = sorted([
+    f for f in os.listdir(VAL_DIR)
+    if os.path.splitext(f)[1].lower() in image_ext
+])
 
-all_tp = all_fp = all_fn = all_tp_correct = 0
-from collections import defaultdict
-errors_by_true  = defaultdict(int)  # true label → nb errors
-errors_confused = defaultdict(int)  # (true, pred) → nb confusions
+all_tp         = all_fp = all_fn = all_tp_correct = 0
+errors_by_true  = defaultdict(int)  # vrai label  → nombre d'erreurs
+errors_confused = defaultdict(int)  # (vrai, prédit) → nombre de confusions
 
 for fname in files:
     img_path = os.path.join(VAL_DIR, fname)
@@ -41,6 +60,8 @@ for fname in files:
 
     with open(ann_path) as f:
         ann_data = json.load(f)
+
+    # Mise à l'échelle de l'image et des coordonnées d'annotation
     orig_w    = ann_data.get("imageWidth", img.shape[1])
     scale     = min(1.0, 1200 / max(img.shape[:2]))
     if scale < 1.0:
@@ -51,6 +72,7 @@ for fname in files:
     circles  = segment_piece(img)
     feats, _ = extract_features(circles, img)
 
+    # Classification de toutes les pièces de l'image
     detects = []
     for feat in feats:
         label, d_mm, conf = classify_piece_rf(feat, feats)
@@ -58,25 +80,30 @@ for fname in files:
         r      = feat["radius"]
         detects.append((cx, cy, r, label))
 
+    # Accumulation des métriques
     m = compute_metrics(detects, gt, IOU_THRESHOLD)
     all_tp         += m["TP"]
     all_fp         += m["FP"]
     all_fn         += m["FN"]
     all_tp_correct += sum(1 for t in m["tp_details"] if t["label_correct"])
+
+    # Collecte des erreurs de label pour la matrice de confusion
     for t in m["tp_details"]:
         if not t["label_correct"]:
             errors_by_true[t["gt_label"]] += 1
             errors_confused[(t["gt_label"], t["det_label"])] += 1
 
+# Calcul des métriques globales
 total_pred = all_tp + all_fp
 total_gt   = all_tp + all_fn
-g_prec     = all_tp / total_pred if total_pred > 0 else 0.0
-g_recall   = all_tp / total_gt   if total_gt   > 0 else 0.0
-g_f1       = 2 * g_prec * g_recall / (g_prec + g_recall) if (g_prec + g_recall) > 0 else 0.0
-g_lbl_acc  = all_tp_correct / all_tp if all_tp > 0 else 0.0
-success    = (g_prec >= SUCCESS_PRECISION and
-              g_recall >= SUCCESS_RECALL and
-              g_lbl_acc >= SUCCESS_LABEL_ACC)
+g_prec    = all_tp / total_pred if total_pred > 0 else 0.0
+g_recall  = all_tp / total_gt   if total_gt   > 0 else 0.0
+g_f1      = (2 * g_prec * g_recall / (g_prec + g_recall)
+             if (g_prec + g_recall) > 0 else 0.0)
+g_lbl_acc = all_tp_correct / all_tp if all_tp > 0 else 0.0
+success   = (g_prec    >= SUCCESS_PRECISION and
+             g_recall  >= SUCCESS_RECALL    and
+             g_lbl_acc >= SUCCESS_LABEL_ACC)
 
 print(f"\n{'='*65}")
 print(f"  RESULTATS RANDOM FOREST ({len(files)} images evaluees)")
@@ -94,6 +121,6 @@ if errors_by_true:
     for label, cnt in sorted(errors_by_true.items(), key=lambda x: -x[1]):
         print(f"    {label:10s} : {cnt}")
     print()
-    print("  CONFUSIONS (vrai->predit : nb)")
-    for (gt, pred), cnt in sorted(errors_confused.items(), key=lambda x: -x[1]):
-        print(f"    {gt:10s} -> {pred:10s} : {cnt}")
+    print("  CONFUSIONS (vrai -> predit : nb)")
+    for (gt_lbl, pred_lbl), cnt in sorted(errors_confused.items(), key=lambda x: -x[1]):
+        print(f"    {gt_lbl:10s} -> {pred_lbl:10s} : {cnt}")
