@@ -50,8 +50,8 @@ Deux approches sont développées et évaluées en parallèle :
 
 | Méthode | Taux d'identification | Précision | Rappel | F1-score |
 |---------|-----------------------|-----------|--------|----------|
-| k-NN classique | **65.4 %** | 91.8 % | 83.4 % | 87.4 % |
-| ExtraTrees (Random Forest) | **71.2 %** | 91.8 % | 83.4 % | 87.4 % |
+| k-NN classique | **73.5 %** | 91.8 % | 83.4 % | 87.4 % |
+| ExtraTrees (Random Forest) | **79.4 %** | 91.8 % | 83.4 % | 87.4 % |
 
 ```
 TP = 257   FP = 23   FN = 51
@@ -103,9 +103,9 @@ Pour chaque pièce, un crop 128×128 normalisé est segmenté en **3 anneaux con
 
 | Anneau | Rayon intérieur | Rayon extérieur |
 |--------|----------------|----------------|
-| Centre | 0 % | 33 % |
-| Médian | 33 % | 66 % |
-| Bord | 66 % | 100 % |
+| Centre | 0 % | 30 % |
+| Médian | 30 % | 60 % |
+| Bord | 60 % | 100 % |
 
 Les 5 canaux extraits sont : **H**, **S**, **V** (espace HSV), **magnitude du gradient Sobel**, **direction du gradient Sobel**.
 
@@ -125,9 +125,9 @@ Même pipeline (scale factor, bimétal), mais le k-NN est remplacé par un `Extr
 
 | Groupe | Seuil de confiance ExtraTrees |
 |--------|-------------------------------|
-| Or | > 0.50 |
+| Or | > 0.55 |
 | Bronze | > 0.60 |
-| Bimétallique | Scale factor prioritaire (2.5 mm d'écart suffisant) |
+| Bimétallique | > 0.55 (séparation finale 1 €/2 € par détection bimétal) |
 
 ---
 
@@ -257,14 +257,14 @@ python run_demo_rf.py
 
 | Critère | k-NN classique | ExtraTrees |
 |---------|---------------|------------|
-| Taux d'identification | 65.4 % | **71.2 %** |
+| Taux d'identification | 73.5 % | **79.4 %** |
 | Entraînement requis | Non (base d'exemples) | Oui (ajustement des arbres) |
-| Exemples d'entraînement | ~188 | ~188 |
+| Exemples d'entraînement | 325 | 325 |
 | Sensibilité aux hyperparamètres | Faible | Modérée |
 | Explicabilité | Élevée (vote par voisinage) | Modérée (importance des features) |
 | Temps d'inférence | Rapide | Rapide |
 
-**Analyse :** avec environ 188 exemples annotés (soit ~20 par classe), l'ExtraTrees améliore le taux d'identification de 5.8 points par rapport au k-NN. Cependant, le k-NN reste compétitif car il ne nécessite pas de généralisation au sens statistique : il mémorise les exemples et vote directement par proximité géométrique dans l'espace des features.
+**Analyse :** avec 325 exemples annotés (soit ~40 par classe), l'ExtraTrees améliore le taux d'identification de 5.9 points par rapport au k-NN. Le k-NN reste compétitif car il ne nécessite pas de généralisation au sens statistique : il mémorise les exemples et vote directement par proximité géométrique dans l'espace des features.
 
 À ce volume de données, les deux approches atteignent la même limite fondamentale : la variabilité intra-classe due à l'éclairage, à l'angle de prise de vue et aux motifs nationaux dépasse la capacité discriminante des descripteurs ring_features.
 
