@@ -9,6 +9,7 @@ import os
 from sklearn.ensemble import ExtraTreesClassifier
 from core.utils import COIN_DIAMETERS_MM, COIN_VALUES_EUR
 
+
 KNN_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "model", "knn_database_rf.npy"
 )
@@ -48,7 +49,7 @@ def _load_rf():
         clf = ExtraTreesClassifier(
             n_estimators=200,
             class_weight="balanced",
-            random_state=_SEEDS.get(color, 42)
+            random_state=_SEEDS.get(color, 42),
         )
         clf.fit(X_filt, y_filt)
         models[color] = clf
@@ -58,10 +59,12 @@ def _load_rf():
 _RF_MODELS = _load_rf()
 
 
-def _rf_predict(ring_features, color):
+
+def _rf_predict(ring_features, color, d_mm=-1.0, prior_sigma=0.0):
     """
     Predit le label d'une piece par Random Forest.
-    La confiance est la proportion de vote des arbres pour la classe predite.
+    d_mm       : diametre en mm estime par le scale factor (-1.0 = inconnu).
+    prior_sigma: si > 0, multiplie les probas par un prior gaussien sur d_mm.
     Retourne (label, confiance) ou (None, 0.0) si modele indisponible.
     """
     if _RF_MODELS is None or ring_features is None:
@@ -71,19 +74,31 @@ def _rf_predict(ring_features, color):
     if color_key not in _RF_MODELS:
         return None, 0.0
 
-    rf    = _RF_MODELS[color_key]
-    q     = ring_features.astype(np.float32).flatten().reshape(1, -1)
-    proba = rf.predict_proba(q)[0]
+    rf = _RF_MODELS[color_key]
+    q  = ring_features.astype(np.float32).flatten()
+
+    proba = rf.predict_proba(q.reshape(1, -1))[0]
+
+    if d_mm > 0 and prior_sigma > 0:
+        prior = np.array([
+            np.exp(-0.5 * ((COIN_DIAMETERS_MM.get(c, d_mm) - d_mm) / prior_sigma) ** 2)
+            for c in rf.classes_
+        ])
+        proba = proba * prior
+        proba = proba / proba.sum()
+
     label = rf.classes_[np.argmax(proba)]
     conf  = float(np.max(proba))
     return label, conf
 
 
-def _detect_bimetal(crop, diff_sat_thr=18):
+
+def _detect_bimetal(crop, diff_sat_thr=18, diff_val_thr=10):
     """
     Detecte si une piece est bimetal en comparant la saturation HSV
     du centre (20% du rayon) vs l'anneau intermediaire (35-44% du rayon).
-    diff_sat_thr: seuil de saturation (18 par defaut, 25+ pour gold->silver).
+    diff_sat_thr: seuil saturation (18 defaut, 24+ pour split final 1€/2€).
+    diff_val_thr: seuil luminosite (10 defaut, 20+ pour gold->silver strict).
     Retourne (is_bimetal, sat_sign).
     """
     if crop is None or crop.size == 0:
@@ -113,7 +128,7 @@ def _detect_bimetal(crop, diff_sat_thr=18):
     diff_val = abs(val_c - val_r)
     sat_sign = sat_c - sat_r  # >0: centre doré→2€, <0: centre argenté→1€
 
-    return (diff_sat > diff_sat_thr) and (diff_val > 10), sat_sign
+    return (diff_sat > diff_sat_thr) and (diff_val > diff_val_thr), sat_sign
 
 
 def classify_all_rf(features_list):
@@ -141,7 +156,7 @@ def classify_all_rf(features_list):
         final_label = rf_label
 
         if final_label in ["1 Euro", "2 Euro"] and crop is not None:
-            is_bimetal, sat_sign = _detect_bimetal(crop)
+            is_bimetal, sat_sign = _detect_bimetal(crop, diff_sat_thr=24)
             if is_bimetal:
                 final_label = "2 Euro" if sat_sign > 0 else "1 Euro"
 
@@ -181,7 +196,6 @@ def classify_all_rf(features_list):
             cands = COLOR_CANDS["unknown"]
 
         # Reclassement gold -> silver si bimetal detecte (cas 2€)
-        # Garde d_mm >= 22mm : 20ct (22.25mm) ne peut pas etre silver (1€=23.25, 2€=25.75)
         if color == "gold" and crop is not None:
             is_bimetal, _ = _detect_bimetal(crop)
             if is_bimetal:
@@ -192,9 +206,8 @@ def classify_all_rf(features_list):
         rf_label, rf_conf = _rf_predict(rf, color)
 
         # RF prioritaire si confiance suffisante, sinon scale factor
+        # silver: SF fiable (ecart 2.5mm), bimetal gere la distinction 1€/2€
         if color == "gold" and rf_label is not None and rf_conf > 0.50:
-            final_label = rf_label
-        elif color == "silver" and rf_label is not None:
             final_label = rf_label
         elif color == "bronze" and rf_label is not None and rf_conf > 0.60:
             final_label = rf_label
@@ -202,8 +215,9 @@ def classify_all_rf(features_list):
             final_label = sf_label
 
         # Separation 1€/2€ par bimetal : sat_sign > 0 = centre doré = 2€
+        # Seuil 25 : evite les faux positifs (FP bimetal → erreurs 1€↔2€)
         if final_label in ["1 Euro", "2 Euro"] and crop is not None:
-            is_bimetal, sat_sign = _detect_bimetal(crop)
+            is_bimetal, sat_sign = _detect_bimetal(crop, diff_sat_thr=24)
             if is_bimetal:
                 final_label = "2 Euro" if sat_sign > 0 else "1 Euro"
 

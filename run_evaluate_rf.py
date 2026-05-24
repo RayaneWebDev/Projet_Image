@@ -25,6 +25,9 @@ files     = sorted([f for f in os.listdir(VAL_DIR)
                     if os.path.splitext(f)[1].lower() in image_ext])
 
 all_tp = all_fp = all_fn = all_tp_correct = 0
+from collections import defaultdict
+errors_by_true  = defaultdict(int)  # true label → nb errors
+errors_confused = defaultdict(int)  # (true, pred) → nb confusions
 
 for fname in files:
     img_path = os.path.join(VAL_DIR, fname)
@@ -60,6 +63,10 @@ for fname in files:
     all_fp         += m["FP"]
     all_fn         += m["FN"]
     all_tp_correct += sum(1 for t in m["tp_details"] if t["label_correct"])
+    for t in m["tp_details"]:
+        if not t["label_correct"]:
+            errors_by_true[t["gt_label"]] += 1
+            errors_confused[(t["gt_label"], t["det_label"])] += 1
 
 total_pred = all_tp + all_fp
 total_gt   = all_tp + all_fn
@@ -81,3 +88,12 @@ print(f"  F1-score                 : {g_f1:.3f}")
 print(f"  Taux d'identification    : {g_lbl_acc:.3f}")
 print(f"  VERDICT : {'VALIDATION REUSSIE' if success else 'VALIDATION ECHOUEE'}")
 print(f"{'='*65}\n")
+
+if errors_by_true:
+    print("  ERREURS PAR CATEGORIE (vrai_label : nb_erreurs)")
+    for label, cnt in sorted(errors_by_true.items(), key=lambda x: -x[1]):
+        print(f"    {label:10s} : {cnt}")
+    print()
+    print("  CONFUSIONS (vrai->predit : nb)")
+    for (gt, pred), cnt in sorted(errors_confused.items(), key=lambda x: -x[1]):
+        print(f"    {gt:10s} -> {pred:10s} : {cnt}")
