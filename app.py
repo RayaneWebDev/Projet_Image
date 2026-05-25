@@ -121,7 +121,7 @@ class CoinRow(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self, text=label,
-            font=ctk.CTkFont("Segoe UI", 13, "bold"),
+            font=ctk.CTkFont("Segoe UI", 16, "bold"),
             text_color=TEXT_MAIN,
         ).grid(row=0, column=1, sticky="w")
 
@@ -558,16 +558,16 @@ class EuroApp(ctk.CTk):
                 r      = feat["radius"]
                 x, y_  = feat["box"][:2]
 
-                cv2.circle(image_out, (cx, cy), r, CIRCLE_GREEN, 2)
+                circle_color = (50, 205, 50) if conf > 0.7 else ((50, 200, 250) if conf > 0.45 else (60, 80, 220))
+                cv2.circle(image_out, (cx, cy), r, circle_color, 2)
 
                 conf_pct = f"{conf * 100:.0f}%"
-                # Contour noir pour lisibilité, puis texte vert
                 cv2.putText(image_out, f"{label}  {conf_pct}",
                             (x, max(y_ - 10, 20)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 0), 4, cv2.LINE_AA)
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 4, cv2.LINE_AA)
                 cv2.putText(image_out, f"{label}  {conf_pct}",
                             (x, max(y_ - 10, 20)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.85, CIRCLE_GREEN, 2, cv2.LINE_AA)
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, circle_color, 2, cv2.LINE_AA)
 
                 details.append((label, conf, value, color_group))
 
