@@ -4,7 +4,7 @@
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.x-5C3EE8?style=flat&logo=opencv&logoColor=white)
 ![Licence](https://img.shields.io/badge/Licence-Acad%C3%A9mique-lightgrey?style=flat)
 
-Système de détection et d'identification automatique de pièces euro dans des images photographiées, développé dans le cadre d'un projet de traitement d'image. Le système implémente deux pipelines distincts : une méthode classique par k-NN et une méthode par apprentissage automatique (ExtraTreesClassifier).
+Système de détection et d'identification automatique de pièces euro dans des images photographiées, développé dans le cadre d'un projet de traitement d'image. Le système implémente deux pipelines distincts : une méthode classique par k-NN et une méthode par K-moyennes (centroïdes par classe).
 
 **Auteurs :** Ales Ferhani, Rayane Taouache, Lounes Medjbour, Dania Benhamma  
 **Université Paris Cité — L3 Informatique — 2025-2026**
@@ -40,7 +40,7 @@ L'objectif est de détecter et d'identifier automatiquement des pièces euro dan
 Deux approches sont développées et évaluées en parallèle :
 
 - **Méthode classique** : scale factor géométrique (pixels → millimètres) associé à un k-NN pondéré sur des descripteurs par anneaux concentriques.
-- **Apprentissage automatique** : mêmes descripteurs, classifiés par un `ExtraTreesClassifier` entraîné indépendamment pour chaque groupe de couleur.
+- **K-moyennes** : mêmes descripteurs, classifiés par K-moyennes entraîné séparément par classe (N_SUB=15 sous-centroïdes par classe, vote agrégé par inverse de distance).
 
 ---
 
@@ -51,7 +51,7 @@ Deux approches sont développées et évaluées en parallèle :
 | Méthode | Taux d'identification | Précision | Rappel | F1-score |
 |---------|-----------------------|-----------|--------|----------|
 | k-NN classique | **73.5 %** | 91.8 % | 83.4 % | 87.4 % |
-| ExtraTrees (Random Forest) | **79.4 %** | 91.8 % | 83.4 % | 87.4 % |
+| K-moyennes (N_SUB=15) | **61.1 %** | 91.8 % | 83.4 % | 87.4 % |
 
 ```
 TP = 257   FP = 23   FN = 51
@@ -119,15 +119,15 @@ Vecteur final : 3 anneaux × 5 canaux × 16 bins = **240 dimensions**.
 2. **k-NN pondéré (k = 5)** : vote pondéré par 1/distance sur une base d'exemples annotés (descripteurs ring_features).
 3. **Détection bimétal** : comparaison de la saturation HSV entre le centre (rayon ≤ 20 %) et l'anneau externe (35–44 %). Les pièces classifiées or avec un centre nettement plus saturé sont reclassifiées en bimétalliques (1 € ou 2 €).
 
-**Méthode ExtraTrees :**
+**Méthode K-moyennes :**
 
-Même pipeline (scale factor, bimétal), mais le k-NN est remplacé par un `ExtraTreesClassifier` entraîné séparément pour chaque groupe chromatique. La décision entre scale factor et ExtraTrees est régie par un seuil de confiance :
+Même pipeline (scale factor, bimétal), mais le k-NN est remplacé par un classifieur K-moyennes entraîné séparément pour chaque classe. N_SUB=15 sous-centroïdes par classe sont appris via `KMeans(init="k-means++", n_init=5)` ; la prédiction agrège les poids inverses de distance sur tous les centroïdes d'une même classe. La décision entre scale factor et K-moyennes est régie par un seuil de confiance :
 
-| Groupe | Seuil de confiance ExtraTrees |
+| Groupe | Seuil de confiance K-moyennes |
 |--------|-------------------------------|
-| Or | > 0.55 |
-| Bronze | > 0.60 |
-| Bimétallique | > 0.55 (séparation finale 1 €/2 € par détection bimétal) |
+| Or | > 0.56 |
+| Bronze | Scale factor toujours (seuil > 1.0, inatteignable) |
+| Bimétallique | Toujours K-moyennes (séparation finale 1 €/2 € par détection bimétal) |
 
 ---
 
@@ -149,8 +149,7 @@ Même pipeline (scale factor, bimétal), mais le k-NN est remplacé par un `Extr
 |-------------|---------|-------|
 | OpenCV | 4.x | Segmentation, extraction de features, traitement d'image |
 | NumPy | 1.x | Calculs vectoriels, manipulation des descripteurs |
-| scikit-learn | 1.x | ExtraTreesClassifier, métriques |
-| PyTorch | 2.x | CNN et MobileNet (comparaison expérimentale, non déployé) |
+| scikit-learn | 1.x | KMeans, métriques |
 | customtkinter | — | Interface graphique |
 | LabelMe | — | Annotation manuelle des images d'entraînement |
 
@@ -165,7 +164,7 @@ Projet_Image/
 │   ├── segmentation.py           # HoughCircles, déduplication, masque circulaire
 │   ├── features.py               # Classification couleur HSV, ellipse, ring_features
 │   ├── classification.py         # Scale factor + k-NN pondéré + détection bimétal
-│   ├── classification_ml.py      # Variante ExtraTrees par groupe chromatique
+│   ├── classification_kmeans.py  # Variante K-moyennes par groupe chromatique
 │   └── utils.py                  # Diamètres officiels, valeurs faciales, draw_label
 │
 ├── evaluation/                   # Outils de mesure des performances
@@ -175,15 +174,14 @@ Projet_Image/
 │   └── test_pipeline.py          # Évaluation sur data/test/
 │
 ├── training/                     # Construction des bases d'exemples
-│   └── build_knn_profiles.py     # Génère knn_database.npy et knn_database_rf.npy
+│   └── build_knn_profiles.py     # Génère model/knn_database.npy
 │
 ├── demo/                         # Démonstrations visuelles (affichage OpenCV)
 │   ├── main.py                   # Pipeline classique, image par image
-│   └── main_rf.py                # Pipeline ExtraTrees, image par image
+│   └── main_kmeans.py            # Pipeline K-moyennes, image par image
 │
 ├── model/                        # Bases d'exemples sérialisées
-│   ├── knn_database.npy          # Base k-NN classique (240 features par exemple)
-│   └── knn_database_rf.npy       # Base ExtraTrees (240 features, float32)
+│   └── knn_database.npy          # Base k-NN / K-moyennes (240 features par exemple)
 │
 ├── data/
 │   ├── validation/               # 100 images annotées pour l'évaluation
@@ -193,9 +191,9 @@ Projet_Image/
 │
 ├── app.py                        # Interface graphique customtkinter
 ├── run_evaluate.py               # Lance l'évaluation de la méthode k-NN
-├── run_evaluate_rf.py            # Lance l'évaluation de la méthode ExtraTrees
+├── run_evaluate_kmeans.py        # Lance l'évaluation de la méthode K-moyennes
 ├── run_demo.py                   # Démonstration visuelle du pipeline classique
-└── run_demo_rf.py                # Démonstration visuelle du pipeline ExtraTrees
+└── run_demo_kmeans.py            # Démonstration visuelle du pipeline K-moyennes
 ```
 
 ---
@@ -213,13 +211,13 @@ Projet_Image/
 git clone https://github.com/RayaneWebDev/Projet_Image.git
 cd Projet_Image
 
-pip install opencv-python numpy scikit-learn torch torchvision customtkinter pillow
+pip install opencv-python numpy scikit-learn customtkinter pillow
 ```
 
 ### Construction de la base d'exemples
 
 ```bash
-# Génère model/knn_database.npy et model/knn_database_rf.npy
+# Génère model/knn_database.npy
 python training/build_knn_profiles.py
 ```
 
@@ -231,8 +229,8 @@ python training/build_knn_profiles.py
 # Méthode classique — k-NN
 python run_evaluate.py
 
-# Méthode machine learning — ExtraTrees
-python run_evaluate_rf.py
+# Méthode K-moyennes
+python run_evaluate_kmeans.py
 ```
 
 ### Interface graphique
@@ -247,26 +245,26 @@ python app.py
 # Pipeline classique
 python run_demo.py
 
-# Pipeline ExtraTrees
-python run_demo_rf.py
+# Pipeline K-moyennes
+python run_demo_kmeans.py
 ```
 
 ---
 
 ## Comparaison des approches
 
-| Critère | k-NN classique | ExtraTrees |
+| Critère | k-NN classique | K-moyennes |
 |---------|---------------|------------|
-| Taux d'identification | 73.5 % | **79.4 %** |
-| Entraînement requis | Non (base d'exemples) | Oui (ajustement des arbres) |
+| Taux d'identification | **73.5 %** | 61.1 % |
+| Entraînement requis | Non (base d'exemples) | Oui (clustering par classe) |
 | Exemples d'entraînement | 325 | 325 |
-| Sensibilité aux hyperparamètres | Faible | Modérée |
-| Explicabilité | Élevée (vote par voisinage) | Modérée (importance des features) |
+| Sensibilité aux hyperparamètres | Faible | Modérée (N_SUB) |
+| Explicabilité | Élevée (vote par voisinage) | Élevée (centroïdes par classe) |
 | Temps d'inférence | Rapide | Rapide |
 
-**Analyse :** avec 325 exemples annotés (soit ~40 par classe), l'ExtraTrees améliore le taux d'identification de 5.9 points par rapport au k-NN. Le k-NN reste compétitif car il ne nécessite pas de généralisation au sens statistique : il mémorise les exemples et vote directement par proximité géométrique dans l'espace des features.
+**Analyse :** avec 325 exemples annotés (soit ~40 par classe), le k-NN surpasse K-moyennes de 12.4 points. Le k-NN mémorise chaque exemple individuellement et vote par proximité géométrique directe dans l'espace des features, ce qui lui confère un avantage sur les petits corpus.
 
-À ce volume de données, les deux approches atteignent la même limite fondamentale : la variabilité intra-classe due à l'éclairage, à l'angle de prise de vue et aux motifs nationaux dépasse la capacité discriminante des descripteurs ring_features.
+K-moyennes compresse la base en N_SUB=15 centroïdes par classe, perdant ainsi l'information de variabilité intra-classe. La limite est particulièrement marquée sur le groupe or (10 ct / 20 ct / 50 ct) : les centroïdes de ces trois classes convergent vers des régions similaires de l'espace, rendant les frontières de décision floues.
 
 La principale source d'erreur résiduelle est la confusion au sein du groupe or (10 ct / 20 ct / 50 ct) : ces trois pièces partagent la même couleur et des diamètres séparés de seulement 2 mm, ce qui les rend quasiment indiscernables en vision 2D sans information de profondeur.
 
@@ -274,10 +272,10 @@ La principale source d'erreur résiduelle est la confusion au sein du groupe or 
 
 ## Perspectives
 
-- **Augmentation du corpus** : un ensemble de 500 exemples par classe permettrait aux méthodes d'apprentissage automatique de mieux généraliser aux conditions de prise de vue non représentées.
-- **Transfer learning** : un modèle léger pré-entraîné (MobileNetV3, EfficientNet-Lite) fine-tuné sur les 8 classes pourrait capturer les textures à haute fréquence que les histogrammes ne discriminent pas.
+- **Augmentation du corpus** : un ensemble de 500 exemples par classe permettrait à K-moyennes de mieux couvrir la variabilité intra-classe et réduire l'écart avec k-NN.
+- **Descripteurs texturaux** : l'ajout de LBP (Local Binary Patterns) ou de matrices de co-occurrence de Haralick pourrait améliorer la discrimination au sein du groupe or.
 - **Vision 3D** : l'exploitation du relief embossé via une caméra de profondeur atteindrait théoriquement 99.6 % d'identification (Hossfeld et al., 2006).
-- **Déploiement embarqué** : intégration dans une application mobile avec inférence locale (ONNX Runtime, TensorFlow Lite).
+- **Déploiement embarqué** : intégration dans une application mobile avec inférence locale (ONNX Runtime).
 
 ---
 

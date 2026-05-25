@@ -1,21 +1,23 @@
 """
-Évaluation du pipeline de classification ExtraTrees (variante RF).
+Évaluation du pipeline de classification K-moyennes.
 
-Parcourt data/validation, classe chaque pièce avec classify_piece_rf()
+Parcourt data/validation, classe chaque pièce avec classify_piece_kmeans()
 et calcule précision, rappel, F1 et taux d'identification globaux.
 Affiche également la matrice de confusion des erreurs de label.
 
 Seuils de validation :
-  - Précision       ≥ 0.75
-  - Rappel          ≥ 0.75
-  - Taux d'identification ≥ 0.70
+  - Précision       >= 0.75
+  - Rappel          >= 0.75
+  - Taux d'identification >= 0.70
 
-Comparer les résultats avec run_evaluate.py (pipeline k-NN classique).
+Comparer avec :
+  run_evaluate.py     -> pipeline k-NN classique (73.5%)
+  run_evaluate_rf.py  -> pipeline ExtraTrees     (79.4%)
 
 Utilisation :
-    python run_evaluate_rf.py
+    python run_evaluate_kmeans.py
 
-Auteurs : Équipe ImageGroupe
+Auteurs : Equipe ImageGroupe
 Date    : 2026
 """
 import os
@@ -25,7 +27,7 @@ from collections import defaultdict
 
 from core.segmentation import segment_piece
 from core.features import extract_features
-from core.classification_ml import classify_piece_rf
+from core.classification_kmeans import classify_piece_kmeans
 from evaluation.metrics import compute_metrics
 from evaluation.evaluate import load_annotation
 
@@ -45,8 +47,8 @@ files     = sorted([
 ])
 
 all_tp         = all_fp = all_fn = all_tp_correct = 0
-errors_by_true  = defaultdict(int)  # vrai label  → nombre d'erreurs
-errors_confused = defaultdict(int)  # (vrai, prédit) → nombre de confusions
+errors_by_true  = defaultdict(int)
+errors_confused = defaultdict(int)
 
 for fname in files:
     img_path = os.path.join(VAL_DIR, fname)
@@ -61,7 +63,6 @@ for fname in files:
     with open(ann_path) as f:
         ann_data = json.load(f)
 
-    # Mise à l'échelle de l'image et des coordonnées d'annotation
     orig_w    = ann_data.get("imageWidth", img.shape[1])
     scale     = min(1.0, 1200 / max(img.shape[:2]))
     if scale < 1.0:
@@ -72,22 +73,19 @@ for fname in files:
     circles  = segment_piece(img)
     feats, _ = extract_features(circles, img)
 
-    # Classification de toutes les pièces de l'image
     detects = []
     for feat in feats:
-        label, d_mm, conf = classify_piece_rf(feat, feats)
+        label, d_mm, conf = classify_piece_kmeans(feat, feats)
         cx, cy = feat["center"]
         r      = feat["radius"]
         detects.append((cx, cy, r, label))
 
-    # Accumulation des métriques
     m = compute_metrics(detects, gt, IOU_THRESHOLD)
     all_tp         += m["TP"]
     all_fp         += m["FP"]
     all_fn         += m["FN"]
     all_tp_correct += sum(1 for t in m["tp_details"] if t["label_correct"])
 
-    # Collecte des erreurs de label pour la matrice de confusion
     for t in m["tp_details"]:
         if not t["label_correct"]:
             errors_by_true[t["gt_label"]] += 1
@@ -106,7 +104,7 @@ success   = (g_prec    >= SUCCESS_PRECISION and
              g_lbl_acc >= SUCCESS_LABEL_ACC)
 
 print(f"\n{'='*65}")
-print(f"  RESULTATS RANDOM FOREST ({len(files)} images evaluees)")
+print(f"  RESULTATS K-MOYENNES ({len(files)} images evaluees)")
 print(f"{'='*65}")
 print(f"  TP={all_tp}  FP={all_fp}  FN={all_fn}")
 print(f"  Precision                : {g_prec:.3f}")
@@ -114,6 +112,14 @@ print(f"  Rappel                   : {g_recall:.3f}")
 print(f"  F1-score                 : {g_f1:.3f}")
 print(f"  Taux d'identification    : {g_lbl_acc:.3f}")
 print(f"  VERDICT : {'VALIDATION REUSSIE' if success else 'VALIDATION ECHOUEE'}")
+print(f"{'='*65}")
+
+print(f"\n  COMPARAISON DES METHODES")
+print(f"  {'Methode':<30} {'Identification':>14}")
+print(f"  {'-'*46}")
+print(f"  {'k-NN classique':<30} {'73.5 %':>14}")
+print(f"  {'K-moyennes (ce script)':<30} {g_lbl_acc*100:>13.1f} %")
+print(f"  {'ExtraTrees':<30} {'79.4 %':>14}")
 print(f"{'='*65}\n")
 
 if errors_by_true:

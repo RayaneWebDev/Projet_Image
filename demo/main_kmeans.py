@@ -1,5 +1,5 @@
 """
-Demo visuelle du pipeline de reconnaissance de pieces euro — Random Forest.
+Demo visuelle du pipeline de reconnaissance de pieces euro — K-moyennes.
 Traite toutes les images du dossier demo_images_val/ et affiche
 le resultat avec les labels et le total en euros.
 """
@@ -8,13 +8,13 @@ import cv2
 
 from core.segmentation import segment_piece
 from core.features import extract_features
-from core.classification_ml import classify_piece_rf, get_coin_value
+from core.classification_kmeans import classify_piece_kmeans, get_coin_value
 from core.utils import draw_label
 
 
-def process_image_rf(image_path, debug=False):
+def process_image_kmeans(image_path, debug=False):
     """
-    Traite une image avec le pipeline Random Forest et affiche le resultat.
+    Traite une image avec le pipeline K-moyennes et affiche le resultat.
     debug=True : affiche aussi la couleur detectee (bronze/gold/silver).
     """
     image = cv2.imread(image_path)
@@ -36,7 +36,7 @@ def process_image_rf(image_path, debug=False):
     total = 0.0
 
     for feat in features_list:
-        label, d, conf = classify_piece_rf(feat, features_list)
+        label, d, conf = classify_piece_kmeans(feat, features_list)
         value = get_coin_value(label)
         total += value
 
@@ -72,7 +72,7 @@ def process_image_rf(image_path, debug=False):
                          interpolation=cv2.INTER_AREA)
     draw_label(display, f"TOTAL: {total:.2f} EUR", (10, 30),
                color=(255, 220, 0), scale=0.8)
-    cv2.imshow("Result [Random Forest]", display)
+    cv2.imshow("Result [K-moyennes]", display)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
@@ -95,4 +95,4 @@ if __name__ == "__main__":
             print(f"{len(images)} image(s) dans '{demo_dir}'")
             for img_path in images:
                 print(f"\n--- {os.path.basename(img_path)} ---")
-                process_image_rf(img_path, debug=True)
+                process_image_kmeans(img_path, debug=True)

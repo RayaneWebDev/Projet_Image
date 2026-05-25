@@ -2,7 +2,7 @@
 Interface graphique pour la reconnaissance de pièces euro.
 
 Permet de charger une image, de choisir entre le pipeline k-NN classique
-et le pipeline ExtraTrees (RF), d'afficher les pièces détectées avec leur
+et le pipeline K-moyennes, d'afficher les pièces détectées avec leur
 valeur et d'exporter les résultats en CSV ou JSON.
 
 Stack technique : tkinter + customtkinter, thème clair pastel.
@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.segmentation import segment_piece
 from core.features import extract_features
 from core.classification import classify_all
-from core.classification_ml import classify_all_rf
+from core.classification_kmeans import classify_all_kmeans
 from core.utils import COIN_VALUES_EUR
 
 ctk.set_appearance_mode("light")
@@ -146,7 +146,7 @@ class EuroApp(ctk.CTk):
     """
     Application principale de reconnaissance de pièces euro.
 
-    Gère le chargement d'image, le lancement du pipeline (k-NN ou RF)
+    Gère le chargement d'image, le lancement du pipeline (k-NN ou K-moyennes)
     dans un thread séparé, l'affichage des résultats et l'export CSV/JSON.
     """
 
@@ -236,7 +236,7 @@ class EuroApp(ctk.CTk):
         self._algo_var = tk.StringVar(value="k-NN")
         seg = ctk.CTkSegmentedButton(
             panel,
-            values=["k-NN", "RF"],
+            values=["k-NN", "K-Means"],
             variable=self._algo_var,
             font=ctk.CTkFont("Segoe UI", 11, "bold"),
             selected_color=ACCENT_D,
@@ -488,9 +488,9 @@ class EuroApp(ctk.CTk):
     def _on_algo_change(self, *_):
         """Met à jour la description et le badge lorsque l'algorithme change."""
         algo = self._algo_var.get()
-        if algo == "RF":
-            self._algo_desc.configure(text="Random Forest\n(ExtraTrees, 200 arbres)")
-            self.lbl_algo_badge.configure(text="Random Forest", text_color=SECONDARY_D)
+        if algo == "K-Means":
+            self._algo_desc.configure(text="K-moyennes\n(centroïdes par classe)")
+            self.lbl_algo_badge.configure(text="K-Means", text_color=SECONDARY_D)
         else:
             self._algo_desc.configure(text="k-NN classique\n(scale factor + votes)")
             self.lbl_algo_badge.configure(text="k-NN", text_color=ACCENT_D)
@@ -543,7 +543,7 @@ class EuroApp(ctk.CTk):
             features_list, image_out = extract_features(circles, img)
 
             algo    = self._algo_var.get()
-            results = classify_all_rf(features_list) if algo == "RF" else classify_all(features_list)
+            results = classify_all_kmeans(features_list) if algo == "K-Means" else classify_all(features_list)
 
             total   = 0.0
             details = []
